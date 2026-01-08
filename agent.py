@@ -1,6 +1,9 @@
+from http.client import HTTPException
 import os
 import requests
 from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from telegram.ext import Application, MessageHandler, filters
@@ -19,6 +22,9 @@ if not TELEGRAM_TOKEN:
 
 if not OPENWEATHER_API_KEY:
     raise RuntimeError("OPENWEATHER_API_KEY is not set")
+
+
+app = FastAPI(title="Weather Agent Webhook")
 
 # =======================
 # LLM
@@ -78,32 +84,62 @@ agent = create_agent(
     ),
 )
 
-# =======================
-# TELEGRAM HANDLER
-# =======================
-async def handle(update, context):
-    try:
-        user_text = update.message.text
 
+# =======================
+# REQUEST SCHEMA
+# =======================
+class WebhookRequest(BaseModel):
+    message: str
+
+class WebhookResponse(BaseModel):
+    reply: str
+
+# =======================
+# WEBHOOK
+# =======================
+@app.post("/webhook", response_model=WebhookResponse)
+def webhook(payload: WebhookRequest):
+    try:
         result = agent.invoke({
             "messages": [
-                {"role": "user", "content": user_text}
+                {"role": "user", "content": payload.message}
             ]
         })
 
-        await update.message.reply_text(
-            result["messages"][-1].content
-        )
+        return {
+            "reply": result["messages"][-1].content
+        }
 
     except Exception as e:
         print("ERROR:", e)
-        await update.message.reply_text("⚠️ Something went wrong. Try again.")
+        raise HTTPException(status_code=500, detail="Agent error")
+
+# # =======================
+# # TELEGRAM HANDLER
+# # =======================
+# async def handle(update, context):
+#     try:
+#         user_text = update.message.text
+
+#         result = agent.invoke({
+#             "messages": [
+#                 {"role": "user", "content": user_text}
+#             ]
+#         })
+
+#         await update.message.reply_text(
+#             result["messages"][-1].content
+#         )
+
+#     except Exception as e:
+#         print("ERROR:", e)
+#         await update.message.reply_text("⚠️ Something went wrong. Try again.")
 
 # =======================
 # APP
 # =======================
-app = Application.builder().token(TELEGRAM_TOKEN).build()
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
+# app = Application.builder().token(TELEGRAM_TOKEN).build()
+# app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
-print("🤖 Weather bot is running...")
-app.run_polling()
+# print("🤖 Weather bot is running...")
+# app.run_polling()

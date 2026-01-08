@@ -1,6 +1,8 @@
 services:
   chain-bot:
     build: .
+    ports:
+      - "8000:8000"
     container_name: chain-bot
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
@@ -8,10 +10,7 @@ services:
 
     develop:
       watch:
-        # 🔁 при изменении Python-кода — перезапуск контейнера
         - action: restart
           path: ./agent.py
-
-        # 🔁 если меняются зависимости — пересборка образа
         - action: rebuild
           path: ./requirements.txt
