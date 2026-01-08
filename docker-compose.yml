@@ -1,0 +1,17 @@
+services:
+  chain-bot:
+    build: .
+    container_name: chain-bot
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+    develop:
+      watch:
+        # 🔁 при изменении Python-кода — перезапуск контейнера
+        - action: restart
+          path: ./agent.py
+
+        # 🔁 если меняются зависимости — пересборка образа
+        - action: rebuild
+          path: ./requirements.txt

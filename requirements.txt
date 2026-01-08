@@ -1,0 +1,7 @@
+langchain
+langchain-openai
+langgraph
+httpx
+python-telegram-bot[aio]
+python-dotenv
+watchdog
