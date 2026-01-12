@@ -10,7 +10,6 @@ from langchain.agents import create_agent
 from pydantic import RootModel
 import json
 
-# ENV
 load_dotenv()
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 API_KEY = os.getenv("OPENAI_API_KEY")
@@ -20,25 +19,21 @@ if not OPENWEATHER_API_KEY:
 if not API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set")
 
-# LLM — создаём глобально
 llm = ChatOpenAI(
     model="gpt-5.1",
     api_key=API_KEY,
     temperature=0.3,
 )
 
-# FastAPI
 app = FastAPI()
 
 
-# Модель запроса — любой JSON
 class WebhookRequest(RootModel):
-    root: dict | list  # сюда придёт весь JSON
+    root: dict | list  
 
 
-# Модель ответа
 class WebhookResponse(RootModel):
-    root: str  # ответ агента как строка
+    root: str  
 
 
 @app.post("/webhook", response_model=WebhookResponse)
@@ -50,7 +45,7 @@ async def webhook(payload: WebhookRequest):
     except (TypeError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
-    system_prompt = f"""Siz professional AI yordamchisiz. 
+    system_prompt = f"""Siz professional AI yordamchisiz.   
 
 Sizga keladigan ma’lumot — kompaniya haqida JSON.
 {input_data}
@@ -563,94 +558,9 @@ Qat'iy qoidalar:
 
     agent = create_agent(model=llm, tools=[], system_prompt=system_prompt)
 
-    # invoke возвращает объект с messages, каждый из которых AIMessage
     result = agent.invoke({"messages": [{"role": "user", "content": input_data}]})
 
-    # берём текст последнего сообщения
     html = result["messages"][-1].content
 
     return HTMLResponse(content=html, status_code=200)
 
-
-# # LLM
-# llm = ChatOpenAI(
-#     model="gpt-5.1",
-#     api_key=api_key,
-#     temperature=0.3,
-# )
-
-
-# # AGENT
-# agent = create_agent(
-#     model=llm,
-#     tools=[],
-#     system_prompt = (
-#     f"""Siz professional AI yordamchisiz.
-
-
-# from telegram.ext import Application, MessageHandler, filters
-# TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-
-# # TOOL: OpenWeather
-# def get_weather(city: str) -> str:
-#     """Get current weather for a city using OpenWeather API"""
-
-#     url = "https://api.openweathermap.org/data/2.5/weather"
-#     params = {
-#         "q": city,
-#         "appid": OPENWEATHER_API_KEY,
-#         "units": "metric",
-#         "lang": "en",
-#     }
-
-#     try:
-#         r = requests.get(url, params=params, timeout=10)
-#         r.raise_for_status()
-#     except Exception:
-#         return f"❌ I couldn't get weather for **{city}**"
-
-#     data = r.json()
-
-#     temp = data["main"]["temp"]
-#     feels = data["main"]["feels_like"]
-#     desc = data["weather"][0]["description"].capitalize()
-#     wind = data["wind"]["speed"]
-#     city_name = data["name"]
-
-#     return (
-#         f"🌤 **Weather in {city_name}**\n"
-#         f"🌡 Temperature: {temp}°C (feels like {feels}°C)\n"
-#         f"☁ Condition: {desc}\n"
-#         f"💨 Wind: {wind} m/s"
-#     )
-
-
-# # TELEGRAM HANDLER
-
-# async def handle(update, context):
-#     try:
-#         user_text = update.message.text
-
-#         result = agent.invoke({
-#             "messages": [
-#                 {"role": "user", "content": user_text}
-#             ]
-#         })
-
-#         await update.message.reply_text(
-#             result["messages"][-1].content
-#         )
-
-#     except Exception as e:
-#         print("ERROR:", e)
-#         await update.message.reply_text("⚠️ Something went wrong. Try again.")
-
-
-# APP
-
-# app = Application.builder().token(TELEGRAM_TOKEN).build()
-# app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-
-# print("🤖 Weather bot is running...")
-# app.run_polling()
