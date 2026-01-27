@@ -1,0 +1,237 @@
+{
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "ee2d64f3-e76f-48dd-8354-04a59cc4f2ad",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2.1,
+            "position": [
+                -304,
+                -128
+            ],
+            "id": "038ca774-62c6-430f-b328-653acb8ca8af",
+            "name": "Webhook",
+            "webhookId": "ee2d64f3-e76f-48dd-8354-04a59cc4f2ad"
+        },
+        {
+            "parameters": {
+                "promptType": "define",
+                "text": "={{ $json.body.message }}",
+                "options": {
+                    "systemMessage": "=Sen malakali doctor yordamchisisan! \nSening vazifang user yozgan shikoyatlari bo'yicha qaysi doktor unga mos kelishini aniqlash va uni to'g'ri doktorga yo'naltirish.\n\nEng muhim qoidalar:\nDoktor id hech qachon to'qib chiqarilmasin.\nId chiqarishda chat tarixidan foydalanmang.\nId Chiqarish har doim \"Search Doctor\" toolga murojat qilgandan keyin bolishi kerak.\nMaslahat berish jarayonida <doctor malumotlari> har doim bolishi kerak.\nFoydalanuvchi yozgan til va alifboda javob berish kerak.\n\nIsh tartibi:\n- Kop tillilik: Foydalanuvchi senga qaysi tilda(masalan o'zbekcha, ruscha) va qanday alifboda (masalan kirill, lotin) yozsa barcha javoblar faqat shunday tilda va shu alifboda bo'lsin.\n\n- Foydalanuvchi senga kasalligi yoki muammolari haqida yozadi sen bu muammoga mos doctor tavsiya qilishing kerak.\n\n- Kasallik haqidagi savollar bazida mavhum bolishi mumkin masalan \"Og'limning harakterida o'zgarish bo'layapti\" kabi savollarga ham iloji boricha eng yaqin doctorni tavsiya berishi kerak.\n\n- Foydalanuvchi og'rig'i haqida aytadi sen unga quydagi doktorlar orasidan keraklisini tanlaysan:\nakusher-ginekolog,\nallergist,\nangiologist,\nandrologist,\nanesteziolog-reanimatolog,\naritmolog,\naphasiologist,\nbariatricheskiy-xirurg,\nvaleolog,\nvertebrologist,\nvet,\nvirologist,\nobstetrician,\nvrach-dietolog,\nlaboratory-doctor,\nvrach-lfk,\nnarodnaya-medicina,\ngeneral-doctor,\nvrach-transfuziolog,\nvrach-ehndoskopist,\ngastroenterologist,\ngelmintolog,\nhematologist,\ngeneticist,\nhepatologist,\ngynecologist,\nginekolog-ehndokrinolog,\ngirudoterapevt,\ndermatovenereologist,\ndermato-onkolog,\nchildrens_gynecologist,\nchildrens-infectious-disease,\nchildrens-neurologist,\npediatric-neurosurgeon,\nchildrens-oncologist,\nchildrens-psychologist,\nchildrens-resuscitator,\npediatric-urologist,\nchildrens-endocrinologist,\ndefectologist,\nnutritionist,\nacupuncturist,\nimmunologist,\nintervencionnyj-kardiolog,\ninfectionist,\ncardiologist,\ncardioresuscitator,\ncardio_surgeon,\nkinezioterapevt,\nkovidolog,\ncoloproctologist,\nkombustiolog,\ncosmetologist,\nmassage-therapist,\nspeech-therapist,\nent,\nmammologist,\nmanualnyj-terapevt,\nmasseur,\nmedicinskij-kosmetolog,\nmedicinskij-psiholog,\nnurse,\nmikolog,\nnarcologist,\nneurologist,\nnevrolog-refleksoterapevt,\nnejro-onkolog,\nneurosurgeon,\nneyroendokrinolog,\nneonatologist,\nnephrologist,\noligofrenopedagog,\nonkogematolog,\noncogynecologist,\nonkokoloproktolog,\noncologist,\noncologist-mammologist,\nonkolog-himioterapevt,\nonkourolog,\nortodont,\nortoped-vertebrolog,\nchildrens-orthopedist,\northopedist-traumatologist,\nosteopat,\notonevrolog,\nophthalmologist,\noftalmohirurg,\nparasitologist,\npediatrician,\nplastic_surgeon,\npodolog,\npodrostkovyj-psiholog,\nproctologist,\nprofpatolog,\npsixiatr,\npsychologist,\npsychotherapist,\npulmonologist,\npulmonolog-astmolog,\nradiologist,\nrehabilitologist,\nresuscitator,\nrheumatologist,\nrentgenologist,\nreproductologist,\nsexologist,\ncardiovascular-surgeon,\nscreening,\nsomnolog,\ndentist-surgeon,\ndentist,\naudiologist,\ntherapist,\ntoxicologist,\nthoracic-oncologist,\ntorakalhiy-xirurg,\ntraumatologist,\ntrichologist,\nurologist,\nurolog-androlog,\npharmacologist,\nphysiotherapist,\nphlebologist,\nfoniatr,\nphthisiatrician,\nftiziatr-pulmonolog,\nfunctional-diagnostic,\nsurgeon,\nchildrens-surgeon,\ncircumcisiologist,\nmaxillofacial-surgeon,\nehmbriolog,\nehndovaskulyarnyj-hirurg,\nendocrinologist,\nepidemiologist,\nehpileptolog\n\ntanlangan doctor nomini analayzed qiymati o'rniga qo'yasan va quydagi jsonni tayyorlaysan:\n\n{\n        \"page\": \"1\",\n        \"pageSize\": \"300\",\n        \"name\": \"\",\n        \"speciality\": [\"{analayzed}\"]\n}\n\nYoki aynan bitta doktorni qidirishi mumkin bunday holatda doctor nameni jsonga yozib \"Search Doctor\" toolga jonatasan.\nqiymatlar:\n{\n        \"page\": \"1\",\n        \"pageSize\": \"3\",\n        \"name\": <doktor ismi>\n        \"speciality\": <agar bor bo'lsa yo'nalish nomi list ichida yuqoridagi doktor listdan, agar yo'q bolsa bo'sh list []>\n}\n(masalan:\n{\n        \"page\": \"1\",\n        \"pageSize\": \"2\",\n        \"name\": \"Улугбек\",\n        \"speciality\": [\"dentist\"]\n})\n\n\n\"Search Doctor\" tooldan \n{\n  \"results\": [\n    {\n      \"id\": 123,\n      \"name\": \"Botir Mirzaev\",\n      \"rating\": 4.9,\n      \"experience\": \"25 yil\",\n      \"speciality\": \"gastroenterologist\"\n    },\n    {\n      \"id\": 456,\n      \"name\": \"Dilshod Karimov\",\n      \"rating\": 4.8,\n      \"experience\": \"22 yil\",\n      \"speciality\": \"gastroenterologist\"\n    }\n  ]\n}\n\n- Agar masalan foydalanuvhi ism familiyani toliq yozmagan bo'lsa va qidiruvdan bir nechta doctor kelsa ism familiya to'liq yozishini so'ra.\n\n- Tayyor bo'lgan json ma'lumotlarini \"Search Doctor\" ga yuborasan tooldan senga real doctorlar haqida malumotlar keladi.\n\n- \"Search Doctor\" toolga kirmaguncha javob chiqarma. Barcha javob \"searchDoctor\" tooldan kelgan natija asosida bo'lishi kerak. Bazida xato id chiqayapti bunday holat takrorlanmasin idni \"Search Doctor\" tooldan olib jonat.\n\n- Doctor id chiqarishda chat historydan foydalanma. har safar aniqlangan doktor nomini \"Search Doctor\" toolga yuborish orqali kelgan responsedan tasodifiy doktor chiqarish kerak. Doctor idni hech qachon to'qib chiqarma, har doim \"Search Doctor\" tooldan kelgan response asosida bo'lishi kerak.\n\n- Kassalik haqida qisqacha nimadan kelib chiqishi mumkin va tashxis juda ham cho'zilib ketmasin umumiy malumotlar ber qanday choralar ko'rish kerakligi haqida qisqacha tushintir va davomidan * Doktor : tanlangan doktorning ism familiyasi, reytingi, va ish tajribasi chiqsin. \n\n- Yuqoridagi qisimda chiqish natijalari qat'iy shunday bo'lsin, qo'shimchalar kerak emas. * belgisi va davomidagi textlar doim chiqishi kerak. \n\n- Chiqish uchun shablon quyidagicha: \n\"Оshqozon og'rig'i turli sabablardan kelib chiqishi mumkin, masalan, gastroenterit, gastrit yoki oshqozon yarasi kabilar. Agar bu holat davom etsa, albatta, gastroenterologga murojaat qiling. * Мирзаев Ботир Бахрамович, Reyting: 4.9, Ish tajribasi: 25 yil.\"\n\n- Tavsiya qismi 150 ta belgidan oshmasin.\n\n- Ular orasidan tasodifiy 3 ta doctorning idsini doctor_id qiymatga qo'yib chiqarasan.\n\n- Har doim chiqish jsonda bolishi va hamma javob jsonda chiqishi kerak.\n\n{\n\"answer\": <sening javobing>,\n\"doctor_id\" : <doctorning idsi(agar bor bo'lsa aks holda null)>,\n\"answer_2\" : <Xmeddagi hisobingizni qanday to'ldirishni bilasizmi?  (capitalize bo'lib chiqishi kerak. faqat doctor_id bor bo'lgan holatda chiqsin qolgan vaziyatlarda null, qaysi tilda bolsa shu tilda shu mazmundagi javob qaytishi kerak)>,\n\"answer_3\":<\"#fill\" (faqat doctor_id bor bolgan holatda chiqsin qolgan vaziyatlarda null)>\n\"answer_4\":<Hisobingizni to'ldirib ushbu shifokor bilan maslahatlashing.   (capitalize bolib chiqishi kerak. faqat doctor_id bor bo'lgan holatda chiqsin qolgan vaziyatlarda null, qaysi tilda bolsa shu tilda shu mazmundagi javob qaytishi kerak)>\n}\n\n- field nomlarini faqat yuqoridagidek qilishing kerak. (answer,doctor_id,answer_2,answer_3,answer_4)\n\n- Toza json bo'lishi kerak ortiqcha qo'shimchalar kerak emas.\n\n- Yuqoridagdek chiqish majburiy. Hech qanday o'zgartirish kiritma. Faqat shu shablon bo'lsin.\n\nIshlash qoidalari va bazi savollarga javoblar!!!:\n\n- savol:To'lov qilish va hisobni to'ldirish \n- javob: #fill  <buyrug'i kerak. bunday holatda \"answer\" qiymatida faqat #fill buyrug'ini yuborasan. \"answer\":#fill qolgan qiymatlar null>\n\n- savol: Doktor qabuliga yozilish \n- javob:  Doktor oynasiga kiriladi va u yerda online qabul nomli ko'k rangdagi button bor u bosiladi. Kirgach u yerdan kun, soat, qancha vaqt gaplashish va to'lov qilinadigan karta tanlanadi va keyingi tugmasi bosiladi. Keyingi o'chilgan oynada doktor uchun xabar matnini kiritiladi. Shu bilan doktor qabulga yoziladi.\n\n- savol: Yozilgan qabullarni ko'rish \n- javob : Asosiy oynadagi pastgi chap tarafda joylashgan \"Ko'rik\" button bosish orqali ko'rish mumkin. \n\n- savol: Yozilgan ko'riklarni bekor qilish \n- javob: Ko'rik bolimida bekor qilmoqchi bo'lgan uchrashuv ustida bekor qilish tugmasini bosish orqali amalga oshirish mumkin.\n\n- savol: Online kartaga to'langan pullarni qaytarib olish \n- javob: Asosiy oynaning chap yuqori qismida joylashgan 3 ta chiziq bosiladi u yerdan \"Kartalarim\" bo'limi tanlanadi bu yerda virtual karta ustida pastgi o'ng tarafda pulni yechib olish buttoni bor uni bosib karta raqami va summasini kiritish orqali yechib olish mumkin. Faqat bu yerda cheklov bor kartada 50 000 so'mdan ko'p pul bo'lishi kerak. \n\nQuyida sayt ishlashi bo'yicha umumiy tushinchalar berilgan user agar shu yerdagi ma'lumotlar asosida savol bersa shulardan olib hatoliklarni tog'irlab mazmunli qilib userga tushintirish kerak: \n\n- \"Ko'rik bo'limida yuqori qisimdan Kelgusi bo'limida siz yozilgan va doctor tasdiqlagan uchrashuvlar joylashadi, Jarayonda bo'limida siz yozilgan va doctor hali tasdiqlamagan uchrashuvlar joylashgan, Jami bo'limida barcha uchrashuvlar joylashgan, O'tgan bo'limda o'tib ketgan uchrashuvlar joylashgan, Bekor qilindi bo'limida bekor qilingan uchrashuvlar joylashgan.\n\nDoktor bilan faqat online uchrashish mumkin.\"\n\nFoydalanuvchiga faqat javoblarni ber yuqorida yozilganlardan tashqari tizim ishlashi, backend taraflari haqida malumot kerak emas.\n\nOddiy  \"salom\", \"yaxshimisiz\" kabi savollarga javob berishing mumkin. \n\nChat davomida har hil yuqorida yozilgan holatlarga tog'ri kelmaydigan, mavzudan tashqari savollar bo'lsa \"Men faqat mavzu doirasida javob bera olaman\" deysan.\n\nUmuman yuqoridagi holatlarga taaluqli bo'lmagan, mavzudan tashqari savollar bo'lsa \"+998 99 895 03 03 raqamga qong'iroq qiling\" deysan.\n"
+                }
+            },
+            "type": "@n8n/n8n-nodes-langchain.agent",
+            "typeVersion": 2.2,
+            "position": [
+                0,
+                -128
+            ],
+            "id": "8b195c0f-8198-49ee-b598-0f2dc44abc1a",
+            "name": "AI Agent"
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n\"answer\":{{ JSON.stringify ($json.answer) }},\n\"doctor_id\":{{ JSON.stringify ($json.doctor_id) }},\n\"answer_2\":{{ JSON.stringify ($json.answer_2 ?? $json.answer2)}},\n\"answer_3\":{{ JSON.stringify ($json.answer_3 ?? $json.answer3) }},\n\"answer_4\":{{ JSON.stringify ($json.answer_4 ?? $json.answer4) }}\n}",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.4,
+            "position": [
+                544,
+                -128
+            ],
+            "id": "bfdf7433-089f-45ed-8fd0-fa391988e444",
+            "name": "Respond to Webhook"
+        },
+        {
+            "parameters": {
+                "model": {
+                    "__rl": true,
+                    "value": "gpt-4o",
+                    "mode": "list",
+                    "cachedResultName": "gpt-4o"
+                },
+                "options": {}
+            },
+            "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+            "typeVersion": 1.2,
+            "position": [
+                -64,
+                80
+            ],
+            "id": "9fdbde2c-e818-4b68-8e00-494c0fee2e6f",
+            "name": "OpenAI Chat Model",
+            "credentials": {
+                "openAiApi": {
+                    "id": "AeRKAaVZp5DLNqAu",
+                    "name": "xmed"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// n8n Function Item node uchun takomillashtirilgan kod\nconst items = [{ json: {} }];\n\nconst inputItem = $input.first();\n\nfunction extractJsonSubstring(s) {\n  const start = s.indexOf('{');\n  if (start === -1) return null;\n  let depth = 0;\n  for (let i = start; i < s.length; i++) {\n    const ch = s[i];\n    if (ch === '{') depth++;\n    else if (ch === '}') depth--;\n    if (depth === 0) {\n      return s.slice(start, i + 1);\n    }\n  }\n  // agar matching '}' topilmasa, qaytar null\n  return null;\n}\n\nfunction tryParseJson(candidate) {\n  if (!candidate) return null;\n  // birinchi urinish: to'g'ridan-to'g'ri parse\n  try {\n    return JSON.parse(candidate);\n  } catch (e1) {\n    // Ikkinchi urinish: single quotes -> double quotes (yengil fallback)\n    try {\n      const tryQuotes = candidate.replace(/(['`])(?:(?=(\\\\?))\\2.)*?\\1/g, (m) => {\n        // oddiy fallback: single-quoted strings -> double quoted\n        if (m.startsWith(\"'\") && !m.includes('\"')) {\n          return '\"' + m.slice(1, -1).replace(/\"/g, '\\\\\"') + '\"';\n        }\n        if (m.startsWith(\"`\") && !m.includes('\"')) {\n          return '\"' + m.slice(1, -1).replace(/\"/g, '\\\\\"') + '\"';\n        }\n        return m;\n      });\n      return JSON.parse(tryQuotes);\n    } catch (e2) {\n      // Uchinchi urinish: oddiy replace barcha single quotes (risk bor)\n      try {\n        const naive = candidate.replace(/'/g, '\"');\n        return JSON.parse(naive);\n      } catch (e3) {\n        return null;\n      }\n    }\n  }\n}\n\nif (inputItem && inputItem.json && inputItem.json.output) {\n  let rawText = String(inputItem.json.output);\n\n  // Boshlang'ich tozalash\n  let cleanedText = rawText\n    .trim()\n    .replace(/```json/gi, '')\n    .replace(/```/g, '')\n    .replace(/^\\(\\s*\\{/, '{')\n    .replace(/\\}\\s*\\)$/, '}')\n    .replace(/[“”]/g, '\"')   // smart quotes\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\s+\\n/g, ' ')\n    .replace(/\\n/g, ' ')\n    .trim();\n\n  // Agar matn ichida JSONga kirishdan oldin ortiqcha so'zlar bo'lsa, brace-matching bilan olinadi\n  let jsonSubstring = extractJsonSubstring(cleanedText);\n\n  let parsed = null;\n  let parseError = null;\n\n  if (jsonSubstring) {\n    parsed = tryParseJson(jsonSubstring);\n  } else {\n    // Agar substring topilmadi, toza matn bilan ham urinish\n    parsed = tryParseJson(cleanedText);\n  }\n\n  if (!parsed) {\n    parseError = \"JSON parse failed\";\n    // Oxirgi imkoniyat: tiklanish uchun to'g'ridan-to'g'ri rawTextni ham sinaymiz\n    parsed = tryParseJson(rawText);\n    if (!parsed) {\n      // baribir bo'lmasa null qoladi\n      parsed = null;\n    } else {\n      parseError = null;\n    }\n  }\n\n  if (parsed) {\n    // Foydali variantlarni olish — bir nechta nomlar uchun tekshiramiz\n    const pick = (obj, names) => {\n      for (const n of names) {\n        if (n in obj && obj[n] !== undefined && obj[n] !== null) return obj[n];\n      }\n      return null;\n    };\n\n    const out = {};\n\n    // Asosiy answer\n    out.answer = pick(parsed, [\"answer\", \"answer1\", \"answer_text\", \"text\"]) ?? null;\n\n    // doctor_id variantlari\n    out.doctor_id = pick(parsed, [\"doctor_id\", \"doctorId\", \"doctor\"]) ?? null;\n\n    // answer2 / answer_2\n    out.answer2 = pick(parsed, [\"answer_2\", \"answer2\", \"answer_II\"]) ?? null;\n\n    // answer3 / answer_3\n    out.answer3 = pick(parsed, [\"answer_3\", \"answer3\"]) ?? null;\n\n    // yangi answer4 / answer_4\n    out.answer4 = pick(parsed, [\"answer_4\", \"answer4\"]) ?? null;\n\n    // Agar original parsed obyektda qo'shimcha maydonlarni saqlamoqchi bo'lsangiz, merge qilishingiz mumkin:\n    // out._raw_parsed = parsed;\n\n    items[0].json = out;\n  } else {\n    // Parse bo'lmasa — fallback: rawTextni answer sifatida qaytaramiz va xato haqida ma'lumot qo'yamiz\n    items[0].json = {\n      answer: rawText,\n      doctor_id: null,\n      answer2: null,\n      answer3: null,\n      answer4: null,\n      error: parseError || \"Could not parse JSON\"\n    };\n  }\n} else {\n  // input mavjud bo'lmasa — asl itemni qaytar\n  items[0].json = inputItem ? inputItem.json : {};\n}\n\nreturn items;\n"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                352,
+                -128
+            ],
+            "id": "1f8b957e-b02b-4e4c-a3f6-e62754ef82a2",
+            "name": "Code in JavaScript"
+        },
+        {
+            "parameters": {
+                "sessionIdType": "customKey",
+                "sessionKey": "={{ $('Webhook').item.json.body.session_id }}",
+                "contextWindowLength": 4
+            },
+            "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+            "typeVersion": 1.3,
+            "position": [
+                96,
+                80
+            ],
+            "id": "6d119d99-a27b-4052-abf1-45434028755b",
+            "name": "Simple Memory"
+        },
+        {
+            "parameters": {
+                "toolDescription": "Call this tool to search suit doctor",
+                "method": "POST",
+                "url": "https://api.plusmed.uz/be/common/searchDoctor",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "language",
+                            "value": "uz"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('JSON', ``, 'json') }}",
+                "options": {}
+            },
+            "type": "n8n-nodes-base.httpRequestTool",
+            "typeVersion": 4.2,
+            "position": [
+                256,
+                80
+            ],
+            "id": "5fe25d0d-557b-4da3-a3ff-7792e21603ec",
+            "name": "Search Doctor"
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "AI Agent",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI Agent": {
+            "main": [
+                [
+                    {
+                        "node": "Code in JavaScript",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "OpenAI Chat Model": {
+            "ai_languageModel": [
+                [
+                    {
+                        "node": "AI Agent",
+                        "type": "ai_languageModel",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Code in JavaScript": {
+            "main": [
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Simple Memory": {
+            "ai_memory": [
+                [
+                    {
+                        "node": "AI Agent",
+                        "type": "ai_memory",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Search Doctor": {
+            "ai_tool": [
+                [
+                    {
+                        "node": "AI Agent",
+                        "type": "ai_tool",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {
+        "Webhook": [
+            {
+                "headers": {
+                    "host": "n8n.tenzorsoft.uz",
+                    "x-real-ip": "185.74.6.223",
+                    "x-forwarded-for": "185.74.6.223",
+                    "x-forwarded-proto": "https",
+                    "connection": "upgrade",
+                    "content-length": "57",
+                    "accept": "application/json, application/*+json",
+                    "content-type": "application/json",
+                    "cache-control": "no-cache",
+                    "pragma": "no-cache",
+                    "user-agent": "Java/1.8.0_472"
+                },
+                "params": {},
+                "query": {},
+                "body": {
+                    "session_id": "79996247",
+                    "message": "boshim og‘riyabdi"
+                },
+                "webhookUrl": "https://n8n.tenzorsoft.uz/webhook/ee2d64f3-e76f-48dd-8354-04a59cc4f2ad",
+                "executionMode": "production"
+            }
+        ]
+    },
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "ed3579581d53ca6fd35b7cb1ccc27777fde1533fc33b2ae1a45a8ab5ce758e83"
+    }
+}

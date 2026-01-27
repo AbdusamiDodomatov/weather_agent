@@ -6,4 +6,10 @@ langgraph
 httpx
 python-telegram-bot[aio]
 python-dotenv
+langchain-community
+langchain-core
 watchdog
+pandas
+openpyxl
+xlrd
+python-multipart

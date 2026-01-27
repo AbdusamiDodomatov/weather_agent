@@ -1,537 +1,897 @@
 import os
 import json
+import re
+import math
+from typing import Any, Dict, List
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
-from typing import Any
+from pydantic import RootModel
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
-from pydantic import RootModel
-import json
+
+router = APIRouter()
+
+# ---------------- helpers (from code.py) ----------------
+
+def is_nil(v: Any) -> bool:
+    return v is None
+
+def clean(v: Any) -> Any:
+    return v.strip() if isinstance(v, str) else v
+
+def val(v: Any) -> str:
+    v = clean(v)
+    if is_nil(v) or v == "" or v == "null" or v == "undefined":
+        return "---"
+    return str(v)
+
+def num_format(x: Any) -> str:
+    if is_nil(x):
+        return "---"
+
+    if isinstance(x, str):
+        s = re.sub(r"\s+", "", x).replace(",", ".")
+        if s in ("", "-", "null", "undefined"):
+            return "---"
+        try:
+            n = float(s)
+        except ValueError:
+            return val(x)
+        if not math.isfinite(n):
+            return val(x)
+        x = n
+
+    if not isinstance(x, (int, float)) or not math.isfinite(float(x)):
+        return val(x)
+
+    fixed = str(round(float(x) + 1e-12, 2))
+    if "." in fixed:
+        int_part, dec_part = fixed.split(".", 1)
+    else:
+        int_part, dec_part = fixed, ""
+
+    grouped = re.sub(r"(?<=\d)(?=(\d{3})+(?!\d))", " ", int_part)
+    dec_part = (dec_part + "00")[:2]
+    return f"{grouped}.{dec_part}"
+
+def safe_arr(a: Any) -> List[Any]:
+    return a if isinstance(a, list) else []
+
+def esc(s: Any) -> str:
+    t = str(s)
+    return (
+        t.replace("&", "&amp;")
+         .replace("<", "&lt;")
+         .replace(">", "&gt;")
+         .replace('"', "&quot;")
+         .replace("'", "&#39;")
+    )
+
+def join_address(region: Any, district: Any, street: Any) -> str:
+    r = val(region)
+    d = val(district)
+    s = val(street)
+    return ", ".join([r, d, s])
+
+def bank_acc_format(acc: Any) -> str:
+    raw = val(acc)
+    if raw == "---":
+        return "---"
+    a = re.sub(r"\s+", "", raw)
+    m = re.match(r"^(.{5})(.{3})(.{1})(.{8})(.*)$", a)
+    if m:
+        return f"{m.group(1)} {m.group(2)} {m.group(3)} {m.group(4)} {m.group(5)}"
+    return raw
+
+def full_name(p: Any) -> str:
+    if not isinstance(p, dict):
+        return "---"
+    parts = [p.get("lastName"), p.get("firstName"), p.get("middleName")]
+    parts = [val(x) for x in parts if x]
+    parts = [x for x in parts if x != "---"]
+    return " ".join(parts) if parts else "---"
+
+def find_row(rows: Any, row_no: str, field: str) -> str:
+    rows_list = safe_arr(rows)
+    r = next((x for x in rows_list if str((x or {}).get("row_no", "")) == str(row_no)), None)
+    if not r:
+        return "---"
+    v = r.get(field)
+    if is_nil(v):
+        return "---"
+    return num_format(v)
+
+def get_in(d: Any, path: List[Any], default=None):
+    cur = d
+    for key in path:
+        if isinstance(key, int):
+            if not isinstance(cur, list) or key < 0 or key >= len(cur):
+                return default
+            cur = cur[key]
+        else:
+            if not isinstance(cur, dict) or key not in cur:
+                return default
+            cur = cur[key]
+    return cur
+
+# ---------------- dictionaries (from code.py) ----------------
+
+DICT = {
+    "uz": {
+        "expertConclusionTitle": "Yakuniy kredit bo‘yicha ekspert xulosasi",
+        "hProject": "Loyiha bo‘yicha ma’lumot",
+        "hCompany": "Kompaniya haqida",
+        "orgFull": "Tashkilotning to‘liq nomi",
+        "inn": "INN",
+        "oked": "Sohasi (OKED)",
+        "cat": "Kompaniya kategoriyasi",
+        "emp": "O'rta ishchilar soni",
+        "addr": "Yuridik manzil",
+        "fund": "Ustav fondi",
+        "foundersTitle": "Ta'sischilar bo‘yicha ma’lumot",
+        "fio": "F.I.O. / Nomi",
+        "who": "Kim hisoblanadi",
+        "share": "Ulushi (%)",
+        "other": "Boshqa subyektlardagi ishtiroki",
+        "director": "Direktor",
+        "ind": "Jismoniy shaxs",
+        "leg": "Yuridik shaxs",
+        "bankReq": "Bank rekvizitlari:",
+        "mainAcc": "Asosiy hisob:",
+        "bankName": "Bank nomi",
+        "acc": "Hisob raqami",
+        "mfo": "MFO",
+        "appShort": "Loyiha haqida qisqacha ma'lumot",
+        "appDesc": "Loyiha tavsifi",
+        "started": "-yilda faoliyatini boshlagan.",
+        "mainAct": "Kompaniyaning asosiy faoliyati",
+        "applied2": "bankka kompaniyaning",
+        "applied3": "maqsadida asosiy vositalar va aylanma mablag'larni sotib olish uchun umumiy kredit shartnomasini tuzishni ko'rib chiqish taklifi bilan murojaat qildi, maksimal kredit limiti",
+        "term": "oy muddatga mo'ljallangan.",
+        "rates": "Kreditlar bo'yicha foiz stavkalari AQSh dollarida yillik 15%, yevroda yillik 15% va milliy valyutada yillik",
+        "sourcePay": "Majburiyatlarni to'lash manbai kompaniyaning davom etayotgan faoliyatidan kelib chiqadi.",
+        "bankFill": "Bank tomonidan to'ldiriladi",
+        "mainObj": "Korxona nomidagi asosiy obyekt (ofis, bino, ombor, turar joy) quyidagi manzilda joylashgan:",
+        "totalArea": "umumiy maydoni",
+        "buildArea": "bino va inshootlar maydoni",
+        "cad": "kadastr raqami",
+        "belongs": "Ushbu yer",
+        "belongs2": "ga tegishli.",
+        "infra": "Hudud zarur kommunal xizmatlar va kommunikatsiyalar bilan jihozlangan.",
+        "built": "Ushbu hududda kompaniya",
+        "built2": "kv.m. maydonga ega yangi ma'muriy bino qurdi.",
+        "collateralTitle": "Garov haqida ma’lumot",
+        "reTitle": "Garovga qo'yilgan bino ma'lumotlari:",
+        "carTitle": "Garovga qo'yilgan mashina ma'lumotlari:",
+        "balanceTitle": "Balans bo'yicha hisobot:",
+        "metric": "Ko'rsatkich nomi",
+        "row": "Qator",
+        "finTitle": "Moliyaviy ko'rsatkichlar ma'lumotlari",
+        "shortAbout": "Korxona haqida qisqacha ma’lumot:",
+        "objs": "Korxona nomidagi obyektlar:",
+        "cars": "Korxona nomidagi mashinalar:",
+        "hTin": "TIN",
+        "hName": "Kompaniya nomi",
+        "hType": "Turi",
+        "hCad": "Kadastr raqami",
+        "hObjName": "Bino nomi",
+        "hAddr": "Manzili",
+        "hShare": "Egalik qiluvchi ulushi (%)",
+        "hInvCost": "Inventar narx",
+        "hTotalArea": "Umumiy maydon",
+        "hBuildArea": "Bino maydoni",
+        "hExtraArea": "Qo'shimcha maydon",
+        "hEstValue": "Garovning taxminiy qiymati",
+        "hModel": "Modeli",
+        "hColor": "Rangi",
+        "hYear": "Yil",
+        "hKuzov": "Kuzov raqami",
+        "hMotor": "Motor",
+        "hShassi": "Shassi",
+        "hGosNumber": "Davlat raqami",
+        "hRegDate": "Ro'yxatdan o'tgan sana",
+        "hDivision": "Diviziya",
+        "hOwner": "Egalik qiluvchi",
+        "unitArea": "kv.m.",
+    },
+    "cyrl": {
+        "expertConclusionTitle": "Якуний кредит бўйича эксперт хулосаси",
+        "hProject": "Лойиҳа бўйича маълумот",
+        "hCompany": "Компания ҳақида",
+        "orgFull": "Ташкилотнинг тўлиқ номи",
+        "inn": "ИНН",
+        "oked": "Соҳаси (ОКЭД)",
+        "cat": "Компания категорияси",
+        "emp": "Ўрта ишчилар сони",
+        "addr": "Юридик манзил",
+        "fund": "Устав фонди",
+        "foundersTitle": "Таъсисчилар бўйича маълумот",
+        "fio": "Ф.И.О. / Номи",
+        "who": "Ким ҳисобланади",
+        "share": "Улуши (%)",
+        "other": "Бошқа субъектлардаги иштироки",
+        "director": "Директор",
+        "ind": "Жисмоний шахс",
+        "leg": "Юридик шахс",
+        "bankReq": "Банк реквизитлари:",
+        "mainAcc": "Асосий ҳисоб:",
+        "bankName": "Банк номи",
+        "acc": "Ҳисоб рақами",
+        "mfo": "МФО",
+        "appShort": "Лойиҳа ҳақида қисқача маълумот",
+        "appDesc": "Лойиҳа тавсифи",
+        "started": "-йилда фаолиятини бошлаган.",
+        "mainAct": "Компаниянинг асосий фаолияти",
+        "applied2": "банкка компаниянинг",
+        "applied3": "мақсадида асосий воситалар ва айланма маблағларни сотиб олиш учун умумий кредит шартномасини тузишни кўриб чиқиш таклифи билан мурожаат қилди, максимал кредит лимити",
+        "term": "ой муддатга мўлжалланган.",
+        "rates": "Кредитлар бўйича фоиз ставкалари АҚШ долларида йиллик 15%, еврода йиллик 15% ва миллий валютада йиллик",
+        "sourcePay": "Мажбуриятларни тўлаш манбаи компаниянинг давом этаётган фаолиятидан келиб чиқади.",
+        "bankFill": "Банк томонидан тўлдирилади",
+        "mainObj": "Корхона номидаги асосий объект (офис, бино, омбор, турар жой) қуйидаги манзилда жойлашган:",
+        "totalArea": "умумий майдони",
+        "buildArea": "бино ва иншоотлар майдони",
+        "cad": "кадастр рақами",
+        "belongs": "Ушбу ер",
+        "belongs2": "га тегишли.",
+        "infra": "Ҳудуд зарур коммунал хизматлар ва коммуникациялар билан жиҳозланган.",
+        "built": "Ушбу ҳудудда компания",
+        "built2": "кв.м. майдонга эга янги маъмурий бино қўрди.",
+        "collateralTitle": "Гаров ҳақида маълумот",
+        "reTitle": "Гаровга қўйилган бино маълумотлари:",
+        "carTitle": "Гаровга қўйилган машина маълумотлари:",
+        "balanceTitle": "Баланс бўйича ҳисобот:",
+        "metric": "Кўрсаткич номи",
+        "row": "Қатор",
+        "finTitle": "Молиявий кўрсаткичлар маълумотлари",
+        "shortAbout": "Корхона ҳақида қисқача маълумот:",
+        "objs": "Корхона номидаги объектлар:",
+        "cars": "Корхона номидаги машиналар:",
+        "hTin": "TIN",
+        "hName": "Компания номи",
+        "hType": "Тури",
+        "hCad": "Кадастр рақами",
+        "hObjName": "Бино номи",
+        "hAddr": "Манзили",
+        "hShare": "Эгалик қилувчи улуши (%)",
+        "hInvCost": "Инвентар нарх",
+        "hTotalArea": "Умумий майдон",
+        "hBuildArea": "Бино майдони",
+        "hExtraArea": "Қўшимча майдон",
+        "hEstValue": "Гаровнинг тахминий қиймати",
+        "hModel": "Модели",
+        "hColor": "Ранги",
+        "hYear": "Йил",
+        "hKuzov": "Кузов рақами",
+        "hMotor": "Мотор",
+        "hShassi": "Шасси",
+        "hGosNumber": "Давлат рақами",
+        "hRegDate": "Рўйхатдан ўтган сана",
+        "hDivision": "Дивизия",
+        "hOwner": "Эгалик қилувчи",
+        "unitArea": "кв.м.",
+    },
+    "en": {
+        "expertConclusionTitle": "Final credit expert conclusion",
+        "hProject": "Project information",
+        "hCompany": "Company details",
+        "orgFull": "Full legal name",
+        "inn": "TIN",
+        "oked": "Business activity (OKED)",
+        "cat": "Company category",
+        "emp": "Average number of employees",
+        "addr": "Legal address",
+        "fund": "Charter capital",
+        "foundersTitle": "Founders information",
+        "fio": "Full name / Company name",
+        "who": "Type",
+        "share": "Share (%)",
+        "other": "Participation in other entities",
+        "director": "Director",
+        "ind": "Individual",
+        "leg": "Legal entity",
+        "bankReq": "Bank details:",
+        "mainAcc": "Main account:",
+        "bankName": "Bank name",
+        "acc": "Account number",
+        "mfo": "MFO",
+        "appShort": "Brief project information",
+        "appDesc": "Project description",
+        "started": "started operating in",
+        "mainAct": "The company’s main activity is",
+        "applied2": "submitted a request to the bank to consider signing a general loan agreement for the purpose of:",
+        "applied3": "Maximum credit limit",
+        "term": "term",
+        "rates": "Interest rates: 15% p.a. in USD, 15% p.a. in EUR, and",
+        "sourcePay": "The source of repayment is generated from the company’s ongoing business activities.",
+        "bankFill": "To be completed by the bank",
+        "mainObj": "The main asset of the enterprise (office, building, warehouse, residential property) is located at:",
+        "totalArea": "total area",
+        "buildArea": "building/structures area",
+        "cad": "cadastral number",
+        "belongs": "This land belongs to",
+        "belongs2": ".",
+        "infra": "The area is equipped with the necessary utilities and communications.",
+        "built": "On this territory, the company constructed a new administrative building with an area of",
+        "built2": "sq.m.",
+        "collateralTitle": "Collateral information",
+        "reTitle": "Collateralized real estate details:",
+        "carTitle": "Collateralized vehicle details:",
+        "balanceTitle": "Balance sheet report:",
+        "metric": "Indicator name",
+        "row": "Row",
+        "finTitle": "Financial indicators",
+        "shortAbout": "Company summary:",
+        "objs": "Assets registered to the company:",
+        "cars": "Vehicles registered to the company:",
+        "hTin": "TIN",
+        "hName": "Company name",
+        "hType": "Type",
+        "hCad": "Cadastral number",
+        "hObjName": "Building name",
+        "hAddr": "Address",
+        "hShare": "Owner's share (%)",
+        "hInvCost": "Inventory cost",
+        "hTotalArea": "Total area",
+        "hBuildArea": "Building area",
+        "hExtraArea": "Additional area",
+        "hEstValue": "Estimated collateral value",
+        "hModel": "Model",
+        "hColor": "Color",
+        "hYear": "Year",
+        "hKuzov": "Body number",
+        "hMotor": "Motor",
+        "hShassi": "Chassis",
+        "hGosNumber": "License plate",
+        "hRegDate": "Registration date",
+        "hDivision": "Division",
+        "hOwner": "Owner",
+        "unitArea": "sq.m.",
+    },
+    "ru": {
+        "expertConclusionTitle": "Итоговое экспертное заключение по кредиту",
+        "hProject": "Информация о проекте",
+        "hCompany": "О компании",
+        "orgFull": "Полное наименование организации",
+        "inn": "ИНН",
+        "oked": "Сфера деятельности (ОКЭД)",
+        "cat": "Категория компании",
+        "emp": "Средняя численность сотрудников",
+        "addr": "Юридический адрес",
+        "fund": "Уставный фонд",
+        "foundersTitle": "Информация об учредителях",
+        "fio": "Ф.И.О. / Наименование",
+        "who": "Кем является",
+        "share": "Доля (%)",
+        "other": "Участие в других субъектах",
+        "director": "Директор",
+        "ind": "Физическое лицо",
+        "leg": "Юридическое лицо",
+        "bankReq": "Банковские реквизиты:",
+        "mainAcc": "Основной счёт:",
+        "bankName": "Наименование банка",
+        "acc": "Расчётный счёт",
+        "mfo": "МФО",
+        "appShort": "Краткая информация о проекте",
+        "appDesc": "Описание проекта",
+        "started": "-году начала свою деятельность.",
+        "mainAct": "Основная деятельность компании",
+        "applied2": "обратилась в банк с предложением о рассмотрении заключения генерального кредитного договора на цели",
+        "applied3": "Максимальный лимит кредитования",
+        "term": "месяцев.",
+        "rates": "Процентные ставки по кредитам: 15% годовых в долларах США, 15% годовых в евро и в национальной валюте",
+        "sourcePay": "Источником погашения обязательств является текущая деятельность компании.",
+        "bankFill": "Заполняется банком",
+        "mainObj": "Основной объект (офис, здание, склад, жилое помещение), зарегистрированный на компанию, находится по адресу:",
+        "totalArea": "общая площадь",
+        "buildArea": "площадь зданий и сооружений",
+        "cad": "кадастровый номер",
+        "belongs": "Эта земля принадлежит",
+        "belongs2": ".",
+        "infra": "Территория оснащена необходимыми коммунальными услугами и коммуникациями.",
+        "built": "На этой территории компания построила новое административное здание площадью",
+        "built2": "кв.м.",
+        "collateralTitle": "Информация о залоге",
+        "reTitle": "Данные о заложенной недвижимости:",
+        "carTitle": "Данные о заложенных транспортных средствах:",
+        "balanceTitle": "Отчет по балансу:",
+        "metric": "Наименование показателя",
+        "row": "Строка",
+        "finTitle": "Финансовые показатели",
+        "shortAbout": "Краткая справка о предприятии:",
+        "objs": "Объекты, числящиеся за предприятием:",
+        "cars": "Транспортные средства, числящиеся за предприятием:",
+        "hTin": "ИНН",
+        "hName": "Наименование организации",
+        "hType": "Тип",
+        "hCad": "Кадастровый номер",
+        "hObjName": "Наименование здания",
+        "hAddr": "Адрес",
+        "hShare": "Доля собственника (%)",
+        "hInvCost": "Инвентарная стоимость",
+        "hTotalArea": "Общая площадь",
+        "hBuildArea": "Площадь здания",
+        "hExtraArea": "Дополнительная площадь",
+        "hEstValue": "Оценочная стоимость залога",
+        "hModel": "Модель",
+        "hColor": "Цвет",
+        "hYear": "Год",
+        "hKuzov": "Номер кузова",
+        "hMotor": "Двигатель",
+        "hShassi": "Шасси",
+        "hGosNumber": "Гос. номер",
+        "hRegDate": "Дата регистрации",
+        "hDivision": "Подразделение",
+        "hOwner": "Собственник",
+        "unitArea": "кв.м.",
+    },
+}
+
+# ---------------- main builder (adapted from code.py) ----------------
+
+def build_html(payload: Any, ai_conclusion: str) -> str:
+    # If payload is a list, try using the first element or treat it as the body
+    if isinstance(payload, list):
+        body = payload[0] if payload else {}
+    else:
+        body = payload.get("body") if isinstance(payload.get("body"), dict) else payload
+        
+    language = str(body.get("language", "uz")).lower()
+
+    L = DICT.get(language) or DICT["uz"]
+
+    company = get_in(body, ["company_info", "data"], {}) or {}
+    bank_info = body.get("bankInfo") or {}
+    app_data = get_in(body, ["applicationInfo", "applicationData"], {}) or {}
+    tax_objects = body.get("taxObjects") or {}
+    forma1 = get_in(body, ["forma_1", "data", 0, "rows"], []) or []
+    forma2 = get_in(body, ["forma_2", "data", 0, "rows"], []) or []
+
+    company_name = val(company.get("name"))
+    tin = val(company.get("tin"))
+    oked = val(get_in(company, ["okedDetail", "name"]))
+    category = val(get_in(company, ["businessTypeDetail", "name"]))
+    employee_count = num_format(body.get("employeeCount"))
+
+    legal_address = join_address(
+        get_in(company, ["companyBillingAddress", "region", "name"]),
+        get_in(company, ["companyBillingAddress", "district", "name"]),
+        get_in(company, ["companyBillingAddress", "streetName"]),
+    )
+    business_fund = num_format(company.get("businessFund"))
+    director_name = full_name(company.get("director"))
+
+    reg_date = val(bank_info.get("regDate"))
+
+    def purpose_by_lang() -> str:
+        a = get_in(body, ["applicationInfo", "applicationData"], {}) or {}
+        if language == "cyrl":
+            return val(a.get("purposeCyrl"))
+        if language == "ru":
+            return val(a.get("purposeRu"))
+        if language == "en":
+            return val(a.get("purposeEn"))
+        return val(a.get("purposeUz"))
+
+    purpose = purpose_by_lang()
+    requested_amount = num_format(app_data.get("requestedAmount"))
+    currency = val(app_data.get("currency"))
+    loan_term_months = val(app_data.get("loanTermMonths"))
+    down_payment_percent = val(app_data.get("downPaymentPercent"))
+
+    first_tax_obj = (safe_arr(tax_objects.get("dataObject"))[0] if safe_arr(tax_objects.get("dataObject")) else {}) or {}
+    main_obj_addr = val(first_tax_obj.get("address"))
+    main_obj_total = num_format(first_tax_obj.get("total_area"))
+    main_obj_land = num_format(first_tax_obj.get("land_area"))
+    main_obj_cad = val(first_tax_obj.get("obj_code"))
+    main_obj_extra = num_format(first_tax_obj.get("land_extra_area"))
+
+    foundation_year = reg_date[:4] if reg_date != "---" and re.match(r"^\d{4}", reg_date) else "---"
+    buildings = str(len(safe_arr(tax_objects.get("dataObject"))) or "---")
+
+    def land_area_sum() -> str:
+        s = 0.0
+        for o in safe_arr(tax_objects.get("dataObject")):
+            v = (o or {}).get("land_area")
+            try:
+                n = float(str(v or "").replace(" ", "").replace(",", "."))
+            except ValueError:
+                n = 0.0
+            if math.isfinite(n):
+                s += n
+        return num_format(s) if s > 0 else "---"
+
+    land_area = land_area_sum()
+    ua = L.get("unitArea")
+
+    # founders
+    founders_html = ""
+    for f in safe_arr(company.get("founders")):
+        is_individual = bool(get_in(f, ["founderIndividual"]))
+        is_legal = bool(get_in(f, ["founderLegal"]))
+
+        if is_individual:
+            fi = get_in(f, ["founderIndividual"], {}) or {}
+            name_parts = [fi.get("lastName"), fi.get("firstName"), fi.get("middleName")]
+            name_parts = [val(x) for x in name_parts if x]
+            name_parts = [x for x in name_parts if x != "---"]
+            name = " ".join(name_parts) if name_parts else "---"
+        else:
+            name = val(get_in(f, ["founderLegal", "name"]))
+
+        type_ = L.get("ind") if is_individual else (L.get("leg") if is_legal else "---")
+        share = val(f.get("sharePercent"))
+
+        founders_html += f"<tr><td>{esc(name)}</td><td>{esc(type_)}</td><td>{esc(share)}</td><td>---</td></tr>"
+
+    # collateral
+    collateral = safe_arr(get_in(body, ["applicationInfo", "collateralData"]))
+
+    collateral_real_estate = ""
+    for i in collateral:
+        if (i or {}).get("yurTaxObjectData") is not None or (i or {}).get("collateralType") == "REAL_ESTATE":
+            y = (i or {}).get("yurTaxObjectData") or {}
+            collateral_real_estate += f"""
+<tr>
+<td>{esc(val(y.get("tin")))}</td>
+<td>{esc(val(y.get("name")))}</td>
+<td>{esc(val(y.get("type")))}</td>
+<td>{esc(val(y.get("obj_code") or (i or {}).get("cadastreOrCarKuzov")))}</td>
+<td>{esc(val(y.get("obj_name")))}</td>
+<td>{esc(val(y.get("address") or (i or {}).get("address")))}</td>
+<td>{esc(val(y.get("percentage")))}</td>
+<td>{esc(num_format(y.get("inv_cost")))}</td>
+<td>{esc(num_format(y.get("total_area")))}</td>
+<td>{esc(num_format(y.get("land_area")))}</td>
+<td>{esc(num_format(y.get("land_extra_area")))}</td>
+<td>{esc(num_format((i or {}).get("estimatedValue")))}</td>
+</tr>
+""".strip()
+
+    collateral_cars = ""
+    for i in collateral:
+        if (i or {}).get("yurCarData") is not None or (i or {}).get("collateralType") == "VEHICLE":
+            c = (i or {}).get("yurCarData") or {}
+            collateral_cars += f"""
+<tr>
+<td>{esc(val(c.get("model")))}</td>
+<td>{esc(val(c.get("color")))}</td>
+<td>{esc(val((i or {}).get("carYear") or c.get("year")))}</td>
+<td>{esc(val((i or {}).get("cadastreOrCarKuzov") or c.get("kuzov")))}</td>
+<td>{esc(val(c.get("motor")))}</td>
+<td>{esc(val(c.get("shassi")))}</td>
+<td>{esc(val((i or {}).get("carLicensePlate") or c.get("gosNumber")))}</td>
+<td>{esc(val(c.get("regDate")))}</td>
+<td>{esc(val(c.get("division")))}</td>
+<td>{esc(val(c.get("owner")))}</td>
+<td>{esc(val(c.get("adres") or (i or {}).get("address")))}</td>
+<td>{esc(num_format((i or {}).get("estimatedValue")))}</td>
+</tr>
+""".strip()
+
+    # company assets
+    tax_obj_rows = ""
+    for item in safe_arr(tax_objects.get("dataObject")):
+        tax_obj_rows += f"""
+<tr>
+<td>{esc(val((item or {}).get("tin")))}</td>
+<td>{esc(val((item or {}).get("name")))}</td>
+<td>{esc(val((item or {}).get("type")))}</td>
+<td>{esc(val((item or {}).get("obj_code")))}</td>
+<td>{esc(val((item or {}).get("obj_name")))}</td>
+<td>{esc(val((item or {}).get("address")))}</td>
+<td>{esc(val((item or {}).get("percentage")))}</td>
+<td>{esc(num_format((item or {}).get("inv_cost")))}</td>
+<td>{esc(num_format((item or {}).get("total_area")))}</td>
+<td>{esc(num_format((item or {}).get("land_area")))}</td>
+<td>{esc(num_format((item or {}).get("land_extra_area")))}</td>
+</tr>
+""".strip()
+
+    car_obj_rows = ""
+    for car in safe_arr(tax_objects.get("carDataObject")):
+        car_obj_rows += f"""
+<tr>
+<td>{esc(val((car or {}).get("model")))}</td>
+<td>{esc(val((car or {}).get("color")))}</td>
+<td>{esc(val((car or {}).get("year")))}</td>
+<td>{esc(val((car or {}).get("kuzov")))}</td>
+<td>{esc(val((car or {}).get("motor")))}</td>
+<td>{esc(val((car or {}).get("shassi")))}</td>
+<td>{esc(val((car or {}).get("gosNumber")))}</td>
+<td>{esc(val((car or {}).get("regDate")))}</td>
+<td>{esc(val((car or {}).get("division")))}</td>
+<td>{esc(val((car or {}).get("owner")))}</td>
+<td>{esc(val((car or {}).get("adres")))}</td>
+</tr>
+""".strip()
+
+    # section 7 labels
+    if language == "ru":
+        S7 = {
+            "a": "Остаточная стоимость основных средств (010-011)",
+            "b": "Итого запасы (150+160+170+180), в том числе:",
+            "c": "Итого дебиторская задолженность (220+240+250+260+270+280+290+300+310)",
+            "d": "Общая сумма активов баланса (130 + 390)",
+            "e": "В том числе: текущая кредиторская задолженность (610+630+650+670+680+690+700+710+720+760)",
+            "f": "Долгосрочные банковские кредиты (7810)",
+            "g": "Краткосрочные банковские кредиты (6810)",
+            "h": "Итого обязательства (480+770)",
+            "i": "Чистая выручка от реализации товаров (работ, услуг)",
+            "j": "Чистая прибыль (убыток) за отчётный период (240-250-260)",
+        }
+    elif language == "en":
+        S7 = {
+            "a": "Residual value of fixed assets (010-011)",
+            "b": "Total inventory (150+160+170+180), including:",
+            "c": "Total receivables (220+240+250+260+270+280+290+300+310)",
+            "d": "Total balance sheet assets (130 + 390)",
+            "e": "Including: current accounts payable (610+630+650+670+680+690+700+710+720+760)",
+            "f": "Long-term bank loans (7810)",
+            "g": "Short-term bank loans (6810)",
+            "h": "Total liabilities (480+770)",
+            "i": "Net revenue from sales of goods (works, services)",
+            "j": "Net profit (loss) for the reporting period (240-250-260)",
+        }
+    else:
+        S7 = {
+            "a": "Асосий воситаларнинг қолдиқ қиймати (010-011)" if language == "cyrl" else "Asosiy vositalarning qoldiq qiymati (010-011)",
+            "b": "Жами инвентаризация (150+160+170+180-қаторлар), шу жумладан:" if language == "cyrl" else "Jami inventarizatsiya (150+160+170+180-qatorlar), shu jumladan:",
+            "c": "Жами дебиторлар (220+240+250+260+270+280+290+300+310 қаторлар)" if language == "cyrl" else "Jami debitorlar (220+240+250+260+270+280+290+300+310 qatorlar)",
+            "d": "Баланс активларининг умумий суммаси (130-қатор + 390-қатор)" if language == "cyrl" else "Balans aktivlarining umumiy summasi (130-qator + 390-qator)",
+            "e": "Шу жумладан: жорий кредиторлик қарзлари (610+630+650+670+680+690+700+710+720+760-қаторлар)" if language == "cyrl" else "Shu jumladan: joriy kreditorlik qarzlari (610+630+650+670+680+690+700+710+720+760-qatorlar)",
+            "f": "Узоқ muddatli bank kreditlari (7810)" if language == "cyrl" else "Uzoq muddatli bank kreditlari (7810)",
+            "g": "Қисқа muddatli bank kreditlari (6810)" if language == "cyrl" else "Qisqa muddatli bank kreditlari (6810)",
+            "h": "Жами мажбуриятлар (480+770-қаторлар)" if language == "cyrl" else "Jami majburiyatlar (480+770-qatorlar)",
+            "i": "Маҳсулотлар (товарлар, ишлар ва хизматлар) сотишдан олинган соф даромад" if language == "cyrl" else "Mahsulotlar (tovarlar, ishlar va xizmatlar) sotishdan olingan sof daromad",
+            "j": "Ҳисобот даври учун соф фойда (зарар) (240-250-260-қаторлар)" if language == "cyrl" else "Hisobot davri uchun sof foyda (zarar) (240-250-260-qatorlar)",
+        }
+
+    # build html
+    html = f"""
+<div style="font-family:'Times New Roman'; font-size:11pt;">
+
+<h2>{L.get("hProject")}: {esc(company_name)}</h2>
+<h3>{L.get("hCompany")}</h3>
+<table border="1" cellspacing="0" cellpadding="4" width="100%" style="font-family:'Times New Roman'; font-size:11pt;">
+<tr><td>{L.get("orgFull")}</td><td>{esc(company_name)}</td></tr>
+<tr><td>{L.get("inn")}</td><td>{esc(tin)}</td></tr>
+<tr><td>{L.get("oked")}</td><td>{esc(oked)}</td></tr>
+<tr><td>{L.get("cat")}</td><td>{esc(category)}</td></tr>
+<tr><td>{L.get("emp")}</td><td>{esc(employee_count)}</td></tr>
+<tr><td>{L.get("addr")}</td><td>{esc(legal_address)}</td></tr>
+<tr><td>{L.get("fund")}</td><td>{esc(business_fund)}</td></tr>
+</table>
+
+<h2>{L.get("foundersTitle")}</h2>
+<table border="1" cellspacing="0" cellpadding="4" width="100%" style="font-family:'Times New Roman'; font-size:11pt;">
+<tr><th>{L.get("fio")}</th><th>{L.get("who")}</th><th>{L.get("share")}</th><th>{L.get("other")}</th></tr>
+{founders_html or "<tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>"}
+<tr><td><b>{L.get("director")}</b></td><td colspan="3">{esc(director_name)}</td></tr>
+</table>
+
+<p><em><u>{L.get("bankReq")}</u></em></p>
+<p><strong>{L.get("mainAcc")}</strong></p>
+<table border="1" cellspacing="0" cellpadding="4" width="100%" style="font-family:'Times New Roman'; font-size:11pt;">
+<tr><td><b>{L.get("bankName")}</b></td><td>{esc(val(bank_info.get("ns2Name")))}</td></tr>
+<tr><td><b>{L.get("acc")}</b></td><td>{esc(bank_acc_format(bank_info.get("account")))}</td></tr>
+<tr><td><b>{L.get("mfo")}</b></td><td>{esc(val(bank_info.get("ns2Code")))}</td></tr>
+</table>
+
+<p><strong><u>{L.get("appShort")}</u></strong></br>
+<strong><u>{L.get("appDesc")}</u></strong></br>
+<strong><u>{esc(company_name)} {esc(reg_date)} {L.get("started")}</u></strong></br></br>
+{L.get("mainAct")} {esc(oked)}.</br>
+<strong><u>{esc(company_name)}</u></strong> {L.get("applied2")} {esc(purpose)}</br>
+{"{0}: {1} {2}; {3}: {4}.".format(L.get("applied3"), esc(requested_amount), esc(currency), L.get("term"), esc(loan_term_months))
+   if language == "ru"
+   else "{0}: {1} {2}; {3}: {4} months.".format(L.get("applied3"), esc(requested_amount), esc(currency), L.get("term"), esc(loan_term_months))
+   if language == "en"
+   else "{0} {1} {2}, {3} {4}".format(L.get("applied3"), esc(requested_amount), esc(currency), esc(loan_term_months), L.get("term"))
+}</br>
+{L.get("rates")} {esc(num_format(down_payment_percent))}%.</br></br>
+<strong><u>{L.get("sourcePay")}</u></strong></p>
+
+<p><strong>{L.get("bankFill")}</strong></br></br>
+<strong>{L.get("mainObj")}</strong> {esc(main_obj_addr)}, {L.get("totalArea")} {esc(main_obj_total)} {ua}, {L.get("buildArea")} {esc(main_obj_land)} {ua}, {L.get("cad")} {esc(main_obj_cad)}.</br>
+{L.get("belongs")} {esc(company_name)}{L.get("belongs2")}</br>
+{L.get("infra")}</br>
+{L.get("built")} {esc(main_obj_extra)} {ua} {L.get("built2") if language in ("uz","cyrl") else ""}</p>
+
+<h3>{L.get("collateralTitle")}</h3>
+<p><em><u>{L.get("reTitle")}</u></em></p>
+<table border="1" cellspacing="0" cellpadding="4" width="100%" style="font-family:'Times New Roman'; font-size:11pt;">
+<tr>
+<th>{L.get("hTin")}</th><th>{L.get("hName")}</th><th>{L.get("hType")}</th>
+<th>{L.get("hCad")}</th><th>{L.get("hObjName")}</th><th>{L.get("hAddr")}</th><th>{L.get("hShare")}</th><th>{L.get("hInvCost")}</th><th>{L.get("hTotalArea")}</th><th>{L.get("hBuildArea")}</th><th>{L.get("hExtraArea")}</th><th>{L.get("hEstValue")}</th>
+</tr>
+{collateral_real_estate or f"<tr><td colspan='12'>---</td></tr>"}
+</table>
+
+</br>
+<p><em><u>{L.get("carTitle")}</u></em></p>
+<table border="1" cellspacing="0" cellpadding="4" width="100%" style="font-family:'Times New Roman'; font-size:11pt;">
+<tr>
+<th>{L.get("hModel")}</th><th>{L.get("hColor")}</th><th>{L.get("hYear")}</th><th>{L.get("hKuzov")}</th><th>{L.get("hMotor")}</th><th>{L.get("hShassi")}</th><th>{L.get("hGosNumber")}</th><th>{L.get("hRegDate")}</th><th>{L.get("hDivision")}</th><th>{L.get("hOwner")}</th><th>{L.get("hAddr")}</th><th>{L.get("hEstValue")}</th>
+</tr>
+{collateral_cars or f"<tr><td colspan='12'>---</td></tr>"}
+</table>
+
+<p><i><u>{L.get("balanceTitle")}</u></i></p>
+<table border="1" cellspacing="0" cellpadding="5">
+<tr><th>{L.get("metric")}</th><th>{L.get("row")}</th><th colspan="2">{esc(company_name)}</th></tr>
+<tr><th></th><th></th><th></th><th></th></tr>
+<tr><td>{S7["a"]}</td><td>010</td><td>{esc(find_row(forma1,"010","sum_begin_period"))}</td><td>{esc(find_row(forma1,"010","sum_end_period"))}</td></tr>
+<tr><td>{S7["b"]}</td><td>140</td><td>{esc(find_row(forma1,"140","sum_begin_period"))}</td><td>{esc(find_row(forma1,"140","sum_end_period"))}</td></tr>
+<tr><td>{S7["c"]}</td><td>210</td><td>{esc(find_row(forma1,"210","sum_begin_period"))}</td><td>{esc(find_row(forma1,"210","sum_end_period"))}</td></tr>
+<tr><td>{S7["d"]}</td><td>400</td><td>{esc(find_row(forma1,"400","sum_begin_period"))}</td><td>{esc(find_row(forma1,"400","sum_end_period"))}</td></tr>
+<tr><td>{S7["e"]}</td><td>601</td><td>{esc(find_row(forma1,"601","sum_begin_period"))}</td><td>{esc(find_row(forma1,"601","sum_end_period"))}</td></tr>
+<tr><td>{S7["f"]}</td><td>570</td><td>{esc(find_row(forma1,"570","sum_begin_period"))}</td><td>{esc(find_row(forma1,"570","sum_end_period"))}</td></tr>
+<tr><td>{S7["g"]}</td><td>730</td><td>{esc(find_row(forma1,"730","sum_begin_period"))}</td><td>{esc(find_row(forma1,"730","sum_end_period"))}</td></tr>
+<tr><td>{S7["h"]}</td><td>780</td><td>{esc(find_row(forma1,"780","sum_begin_period"))}</td><td>{esc(find_row(forma1,"780","sum_end_period"))}</td></tr>
+<tr><td>{L.get("finTitle")}</td><td></td><td></td><td></td></tr>
+<tr><td>{S7["i"]}</td><td>010</td><td>{esc(find_row(forma2,"010","sum_period_doxod"))}</td><td>{esc(find_row(forma2,"010","sum_period_rasxod"))}</td></tr>
+<tr><td>{S7["j"]}</td><td>270</td><td>{esc(find_row(forma2,"270","sum_period_doxod"))}</td><td>{esc(find_row(forma2,"270","sum_period_rasxod"))}</td></tr>
+</table>
+
+<p><strong>{L.get("shortAbout")}</strong></br>
+{(
+    f"Test Company LLC korxonasi {esc(foundation_year)} yildan beri faoliyat yuritib, asosan {esc(oked)} sohasida xizmat ko‘rsatib keladi.</br>"
+    f"Korxona yuridik manzili: {esc(legal_address)}.</br>"
+    f"Korxona balansida {esc(buildings)} dona bino va {esc(land_area)} {ua} yer maydoni mavjud bo‘lib, hudud zarur infratuzilma va kommunikatsiyalar bilan ta’minlangan.</br>"
+    f"Tashkilotda {esc(employee_count)} nafar xodim ishlaydi va ishlab chiqarish quvvati yil sayin oshmoqda.</br>"
+    f"Moliyaviy ko‘rsatkichlar va bozordagi obro‘-e’tibori, shuningdek, aktivlarning likvidligi korxonaga yuqori ishonch beradi."
+) if language == "uz" else (
+    f"Test Company LLC корхонаси {esc(foundation_year)} йилдан бери фаолият юритиб, асосан {esc(oked)} соҳасида хизмат кўрсатиб келади.</br>"
+    f"Корхона юридик манзили: {esc(legal_address)}.</br>"
+    f"Корхона балансида {esc(buildings)} дона бино ва {esc(land_area)} {ua} ер майдони мавжуд бўлиб, ҳудуд зарур инфратузилма ва коммуникациялар билан таъминланган.</br>"
+    f"Ташкилотда {esc(employee_count)} нафар ходим ишлайди ва ишлаб чиқариш қуввати йил сайин ошмоқда.</br>"
+    f"Молиявий кўрсаткичлар ва бозордаги обрў-эътибори, шунингдек, активларнинг ликвидлиги корхонага юқори ишонч беради."
+) if language == "cyrl" else "---"}
+</p>
+
+<p><em><u>{L.get("objs")}</u></em></p>
+<table border="1" cellspacing="0" cellpadding="4" width="100%" style="font-family:'Times New Roman'; font-size:11pt;">
+<tr>
+<th>{L.get("hTin")}</th><th>{L.get("hName")}</th><th>{L.get("hType")}</th><th>{L.get("hCad")}</th><th>{L.get("hObjName")}</th><th>{L.get("hAddr")}</th><th>{L.get("hShare")}</th><th>{L.get("hInvCost")}</th><th>{L.get("hTotalArea")}</th><th>{L.get("hBuildArea")}</th><th>{L.get("hExtraArea")}</th>
+</tr>
+{tax_obj_rows or f"<tr><td colspan='11'>---</td></tr>"}
+</table>
+
+</br>
+<p><em><u>{L.get("cars")}</u></em></p>
+<table border="1" cellspacing="0" cellpadding="4" width="100%" style="font-family:'Times New Roman'; font-size:11pt;">
+<tr>
+<th>{L.get("hModel")}</th><th>{L.get("hColor")}</th><th>{L.get("hYear")}</th><th>{L.get("hKuzov")}</th><th>{L.get("hMotor")}</th><th>{L.get("hShassi")}</th><th>{L.get("hGosNumber")}</th><th>{L.get("hRegDate")}</th><th>{L.get("hDivision")}</th><th>{L.get("hOwner")}</th><th>{L.get("hAddr")}</th>
+</tr>
+{car_obj_rows or f"<tr><td colspan='11'>---</td></tr>"}
+</table>
+
+</div>
+<br><h2>{esc(L.get("expertConclusionTitle"))}</h2><br>
+{ai_conclusion}
+""".strip()
+
+    return html
+
+# ---------------- FastAPI App ----------------
 
 load_dotenv()
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not OPENWEATHER_API_KEY:
-    raise RuntimeError("OPENWEATHER_API_KEY is not set")
 if not API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set")
 
 llm = ChatOpenAI(
-    model="gpt-5.1",
+    model="gpt-4o",
     api_key=API_KEY,
     temperature=0.3,
 )
 
-app = FastAPI()
-
 
 class WebhookRequest(RootModel):
-    root: dict | list  
-
+    root: dict | list
 
 class WebhookResponse(RootModel):
-    root: str  
+    root: str
 
-
-@app.post("/webhook", response_model=WebhookResponse)
+@router.post("/webhook/document", response_model=WebhookResponse)
 async def webhook(payload: WebhookRequest):
-    body = payload.root
-
+    raw_payload = payload.root
+    
+    # Logic from document.py for AI analysis
     try:
-        input_data = json.dumps(body, ensure_ascii=False, indent=2)
+        if isinstance(raw_payload, list):
+            data_root = raw_payload[0] if raw_payload else {}
+        else:
+            data_root = raw_payload.get("body") if isinstance(raw_payload.get("body"), dict) else raw_payload
+        
+        language = str(data_root.get("language", "uz")).lower()
+        print(f"DEBUG: Processing request with language: {language}")
+        
+        app_info = data_root.get("applicationInfo", {})
+        collateral_data = app_info.get("collateralData", [{}])
+        first_collateral = collateral_data[0] if isinstance(collateral_data, list) and collateral_data else {}
+        estimated_value = float(first_collateral.get("estimatedValue", 0))
+        
+        app_data = app_info.get("applicationData", {})
+        requested_amount = float(app_data.get("requestedAmount", 0))
+        
+        # Logic: (estimatedValue * 0.64 > requestedAmount)
+        is_ltv_good = (estimated_value * 0.64) > requested_amount
+        
+        ltv_status_text = "Ijobiy (Positive)" if is_ltv_good else "Salbiy (Negative)"
+        
+        decision_instruction = (
+            "SIZNING XULOSANGIZ: 1-VARIANT (Kredit berish tavsiya qilinadi). Chunki LTV ko'rsatkichi talab darajasida (64% dan past)."
+            if is_ltv_good
+            else "SIZNING XULOSANGIZ: 2-VARIANT (Kommitet tomonidan ko'rib chiqiladi). Chunki LTV ko'rsatkichi yuqori (64% dan yuqori), bu risk hisoblanadi."
+        )
+
+        # Language mapping for LLM understanding
+        lang_map = {
+            "uz": "O'zbek tili (Lotin alifbosi). Javob faqat Lotin alifbosida bo'lishi shart.",
+            "cyrl": "O'zbek tili (Kirill alifbosi). Javob faqat Kirill alifbosida bo'lishi shart. (Masalan: 'Хулоса...', 'Кредит бериш...'). Lotin alifbosidan foydalanish TAQIQLANADI.",
+            "ru": "Rus tili (Kirill alifbosi).",
+            "en": "Ingliz tili."
+        }
+        lang_desc = lang_map.get(language, language)
+        
+    except Exception as e:
+        print(f"Error parsing logic fields: {e}")
+        language = "uz"
+        lang_desc = "O'zbek tili (Lotin alifbosi)"
+        is_ltv_good = False
+        ltv_status_text = "Noma'lum (Error in calculation)"
+        decision_instruction = "Xatolik yuz berdi, 2-VARIANTni tanlang."
+
+    # Format input for LLM visibility
+    try:
+        input_json_str = json.dumps(raw_payload, ensure_ascii=False, indent=2)
     except (TypeError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
-    system_prompt = f"""Siz professional AI yordamchisiz.   
+    system_prompt = f"""Siz professional AI yordamchisiz. 
 
-Sizga keladigan ma’lumot — kompaniya haqida JSON.
-{input_data}
+Sizning vazifangiz: Yakuniy kredit bo‘yicha ekspert xulosasi yaratish.
 
-Sizning vazifangiz: shu JSON asosida chiroyli, Word uchun mos HTML-hujjat yaratish,
-jadval shaklida barcha ma’lumotlarni to‘g‘ri joylashtirish, bo‘sh ma’lumotlarga `---`
-belgisini qo‘yish va hujjat oxirida yakuniy kredit bo‘yicha ekspert xulosasini berish.
-Kelgan JSONda "language" fieldida qaysi tilda xulosa yaratish aytilgan, o'sha tilda chiqarish kerak bo'ladi. Asosiy 4 ta til:
-"uz" - O'zbek tili
-"cyrl" - O'zbek tili kiril alifbosi
-"ru" - Rus tili
-"en" - Ingliz tili
-
+Kelgan JSONda "language" fieldida qaysi tilda xulosa yaratish aytilgan: {language}.
+Tavsif: {lang_desc}
 
 Qat'iy qoida va muhim qoida:
-• HECH QACHON, HECH BIR SO'Z HAM SO'RALGAN TILDAN BOSHQA TILDA CHIQMASIN!
-• HTML HECH QACHON BERILGAN FORMATDAN BOSHQA BULMASLIGI SHART
-• HTMLdan TASHQARI MATN YOKI IZOH YOZILMASIN
-• TABLElar FORMATI, SONI, STRUCTURASI BERILGAN FORMATDA BULISI SHART
-
-
-1-BO‘LIM — Loyiha haqida ma’lumot
-
-
-<h2>Loyiha bo‘yicha ma’lumot: {body.get("company_info", {}).get("data", {}).get("name", "---")}</h2>
-
-<h3>Kompaniya haqida</h3>
-<table border="1" cellspacing="0" cellpadding="4" width="100%"
-       style="font-family:'Times New Roman'; font-size:11pt;">
-<tr><td>Tashkilotning to‘liq nomi</td><td>{body.get("company_info", {}).get("data", {}).get("name", "---")}</td></tr>
-<tr><td>INN</td><td>{body.get("company_info", {}).get("data", {}).get("tin", "---")}</td></tr>
-<tr><td>Sohasi (OKED)</td><td>{body.get("company_info", {}).get("data", {}).get("okedDetail", {}).get("name", "---")}</td></tr>
-<tr><td>Kompaniya kategoriyasi</td><td>{body.get("company_info", {}).get("data", {}).get("businessTypeDetail", {}).get("name", "---")}</td></tr>
-<tr><td>O'rta ishchilar soni</td><td>{body.get("employeeCount", "---")}</td></tr>
-<tr><td>Yuridik manzil</td>
-<td>{body.get("company_info", {}).get("data", {}).get("companyBillingAddress", {}).get("region", {}).get("name", "---")},
-{body.get("company_info", {}).get("data", {}).get("companyBillingAddress", {}).get("district", {}).get("name", "---")},
-{body.get("company_info", {}).get("data", {}).get("companyBillingAddress", {}).get("streetName", "---")}</td></tr>
-<tr><td>Ustav fondi</td><td>{body.get("company_info", {}).get("data", {}).get("businessFund", "---")}</td></tr>
-</table>
-
-
-2-BO‘LIM — Ta'sischilar haqida ma’lumot
-
-
-<h2>Ta'sischilar bo‘yicha ma’lumot</h2>
-
-<table border="1" cellspacing="0" cellpadding="4" width="100%"
-       style="font-family:'Times New Roman'; font-size:11pt;">
-<tr>
-    <th>F.I.O. / Nomi</th>
-    <th>Kim hisoblanadi</th>
-    <th>Ulushi (%)</th>
-    <th>Boshqa subyektlardagi ishtiroki</th>
-</tr>
-
-{''.join(
-    (
-        f"<tr>"
-        f"<td>{founder_name}</td>"
-        f"<td>{founder_type}</td>"
-        f"<td>{f.get('sharePercent', '---')}</td>"
-        f"<td>---</td>"
-        f"</tr>"
-    )
-    for f in body.get("company_info", {}).get("data", {}).get("founders", [])
-    for founder_name, founder_type in [(
-        (
-            ' '.join(filter(None, [
-                f.get('founderIndividual', {}).get('lastName'),
-                f.get('founderIndividual', {}).get('firstName'),
-                f.get('founderIndividual', {}).get('middleName')
-            ])) if f.get('founderIndividual')
-            else f.get('founderLegal', {}).get('name', '---')
-        ),
-        (
-            "Jismoniy shaxs" if f.get('founderIndividual')
-            else "Yuridik shaxs" if f.get('founderLegal')
-            else "---"
-        )
-    )]
-)}
-
-
-<tr>
-    <td><b>Direktor</b></td>
-    <td colspan="3">{
-        ' '.join(filter(None, [
-            body.get("company_info", {}).get("data", {}).get("director", {}).get("lastName"),
-            body.get("company_info", {}).get("data", {}).get("director", {}).get("firstName"),
-            body.get("company_info", {}).get("data", {}).get("director", {}).get("middleName")
-        ])) or '---'
-    }</td>
-</tr>
-</table>
-
-
-3-BANK REKVIZITLARI
-
-
-<p><em><u>Bank rekvizitlari:</u></em></p>
-<p><strong>Asosiy hisob:</strong></p>
-
-<table border="1" cellspacing="0" cellpadding="4" width="100%"
-       style="font-family:'Times New Roman'; font-size:11pt;">
-<tr>
-    <td><b>Bank nomi</b></td>
-    <td>{body.get("bankInfo", {}).get("ns2Name", "---")}</td>
-</tr>
-<tr>
-    <td><b>Hisob raqami</b></td>
-    <td>{
-        ''.join(body.get("bankInfo", {}).get("account", "").split())
-        if body.get("bankInfo", {}).get("account")
-        else "---"
-    }</td>
-</tr>
-<tr>
-    <td><b>MFO</b></td>
-    <td>{body.get("bankInfo", {}).get("ns2Code", "---")}</td>
-</tr>
-</table>
-
-
-4-ARIZA MA'LUMOTLARI
-
-
-<p>
-    <strong><u>Loyiha haqida qisqacha ma'lumot</u></strong>
-    <strong><u>Loyiha tavsifi</u></strong>
-    <strong><u>
-    {body.get("company_info", {}).get("data", {}).get("name", "---")}
-    {body.get("bankInfo", {}).get("regDate", "---")}-yilda faoliyatini boshlagan.
-    </u></strong>
-</p>
-
-<p>
-Kompaniyaning asosiy faoliyati{body.get("company_info", {}).get("data", {}).get("okedDetail", {}).get("name", "---")}
-hisoblanadi.
-<strong><u>Ushbu loyihani amalga oshirish uchun
-{body.get("company_info", {}).get("data", {}).get("name", "---")}
-</u></strong> bankka kompaniyaning
-{(
-    body.get("applicationInfo", {})
-        .get("applicationData", {})
-        .get("purposeUz")
-    or
-    body.get("applicationInfo", {})
-        .get("applicationData", {})
-        .get("purposeRu")
-    or
-    body.get("applicationInfo", {})
-        .get("applicationData", {})
-        .get("purposeEn")
-)
-}maqsadida asosiy vositalar va aylanma mablag'larni sotib olish uchun
-umumiy kredit shartnomasini tuzishni ko'rib chiqish taklifi bilan murojaat qildi,
-maksimal kredit limiti
-{body.get("applicationInfo", {}).get("applicationData", {}).get("requestedAmount")}
-{body.get("applicationInfo", {}).get("applicationData", {}).get("currency")},
-{body.get("applicationInfo", {}).get("applicationData", {}).get("loanTermMonths")}
-oy muddatga mo'ljallangan. Kreditlar aylanma mablag'lar uchun {body.get("applicationInfo", {}).get("applicationData", {}).get("loanTermMonths")} oygacha (kelishuvga muvofiq) va asosiy vositalarni sotib olish uchun {body.get("applicationInfo", {}).get("applicationData", {}).get("loanTermMonths")} oygacha muddatga rejalashtirilgan. Kreditlar bo'yicha foiz stavkalari AQSh dollarida yillik 15%, yevroda yillik 15% va milliy valyutada yillik {body.get("applicationInfo", {}).get("applicationData", {}).get("downPaymentPercent")} % ni tashkil qiladi.
-
-<strong><u>Majburiyatlarni to'lash manbai kompaniyaning davom etayotgan faoliyatidan kelib chiqadi.</u></strong></p>
-
-Yuqorida e'tibor berish kerak bo'lgan muhim joy bor! Ya'ni, kompaniyaning kredit olish maqsadi 4 xil tilda keladi, siz uni tarjima qilinadigan tilga qarab tanlashingiz kerak. Misol
-"language":"uz" bo'lsa -> applicationInfo.applicationData.purposeUz qiymati olinadi.
-"language":"cyrl" bo'lsa -> applicationInfo.applicationData.purposeCyrl qiymati olinadi.
-"language":"ru" bo'lsa -> applicationInfo.applicationData.purposeRu qiymati olinadi.
-"language":"en" bo'lsa -> applicationInfo.applicationData.purposeEn qiymati olinadi.
-
-
-
-
-5-BANK TOMONIDAN TO'LDIRILISHI KERAK BO'LGAN MA'LUMOTLAR
-
-
-<p><strong>Bank tomonidan to'ldiriladi</strong></p>
-
-<p>
-    <strong>Korxona nomidagi asosiy obyekt (ofis, bino, ombor, turar joy)</strong> quyidagi manzilda joylashgan:
-    {body.get("taxObjects", {}).get("dataObject", [{}])[0].get("address", "---")}, umumiy maydoni {body.get("taxObjects", {}).get("dataObject", [{}])[0].get("total_area", "---")} kv.m., bino va inshootlar maydoni {body.get("taxObjects", {}).get("dataObject", [{}])[0].get("land_area", "---")} kv.m., kadastr raqami {body.get("taxObjects", {}).get("dataObject", [{}])[0].get("obj_code", "---")}.
-</p>
-
-
-
-6-BO‘LIM — Garov haqida ma’lumot
-
-
-<h3>Garov haqida ma’lumot</h3>
-
-<p><em><u>Garovga qo'yilgan bino ma'lumotlari:</u></em></p>
-
-<table border="1" cellspacing="0" cellpadding="4" width="100%"
-       style="font-family:'Times New Roman'; font-size:11pt;">
-<tr>
-    <th>TIN</th>
-    <th>Kompaniya nomi</th>
-    <th>Turi</th>
-    <th>Kadastr raqami</th>
-    <th>Bino nomi</th>
-    <th>Manzili</th>
-    <th>Egalik qiluvchi ulushi (%)</th>
-    <th>Inventar narx</th>
-    <th>Umumiy maydon</th>
-    <th>Bino maydoni</th>
-    <th>Qo'shimcha maydon</th>
-    <th>Garovning taxminiy qiymati</th>
-</tr>
-
-{''.join(
-    f"<tr>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('tin', '---')}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('name', '---')}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('type', '---')}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('obj_code', i.get('cadastreOrCarKuzov', '---'))}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('obj_name', '---')}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('address', i.get('address', '---'))}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('percentage', '---')}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('inv_cost', '---')}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('total_area', '---')}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('land_area', '---')}</td>"
-    f"<td>{i.get('yurTaxObjectData', {}).get('land_extra_area', '---')}</td>"
-    f"<td>{i.get('estimatedValue', '---')}</td>"
-    f"</tr>"
-    for i in body.get("applicationInfo", {}).get("collateralData", [])
-    if i.get("yurTaxObjectData") or i.get("collateralType") == "REAL_ESTATE"
-)}
-</table>
-
-
-<p><em><u>Garovga qo'yilgan mashina ma'lumotlari:</u></em></p>
-
-<table border="1" cellspacing="0" cellpadding="4" width="100%"
-       style="font-family:'Times New Roman'; font-size:11pt;">
-<tr>
-    <th>Modeli</th>
-    <th>Rangi</th>
-    <th>Yil</th>
-    <th>Kuzov raqami</th>
-    <th>Motor</th>
-    <th>Shassi</th>
-    <th>Davlat raqami</th>
-    <th>Ro'yxatdan o'tgan sana</th>
-    <th>Diviziya</th>
-    <th>Egalik qiluvchi</th>
-    <th>Manzili</th>
-    <th>Garovning taxminiy qiymati</th>
-</tr>
-
-{''.join(
-    f"<tr>"
-    f"<td>{i.get('yurCarData', {}).get('model', '---')}</td>"
-    f"<td>{i.get('yurCarData', {}).get('color', '---')}</td>"
-    f"<td>{i.get('carYear', i.get('yurCarData', {}).get('year', '---'))}</td>"
-    f"<td>{i.get('cadastreOrCarKuzov', i.get('yurCarData', {}).get('kuzov', '---'))}</td>"
-    f"<td>{i.get('yurCarData', {}).get('motor', '---')}</td>"
-    f"<td>{i.get('yurCarData', {}).get('shassi', '---')}</td>"
-    f"<td>{i.get('carLicensePlate', i.get('yurCarData', {}).get('gosNumber', '---'))}</td>"
-    f"<td>{i.get('yurCarData', {}).get('regDate', '---')}</td>"
-    f"<td>{i.get('yurCarData', {}).get('division', '---')}</td>"
-    f"<td>{i.get('yurCarData', {}).get('owner', '---')}</td>"
-    f"<td>{i.get('yurCarData', {}).get('adres', i.get('address', '---'))}</td>"
-    f"<td>{i.get('estimatedValue', '---')}</td>"
-    f"</tr>"
-    for i in body.get("applicationInfo", {}).get("collateralData", [])
-    if i.get("yurCarData") or i.get("collateralType") == "VEHICLE"
-)}
-</table>
-
-
-
-
-7-BALANS HISOBOTI
-
-
-<p><em><u>Balans bo'yicha hisobot:</u></em></p>
-
-<table border="1" cellspacing="0" cellpadding="5">
-<tr>
-    <th>Ko'rsatkich nomi</th>
-    <th>Qator</th>
-    <th colspan="2">
-        {body.get("company_info", {}).get("data", {}).get("name", "---")}
-    </th>
-</tr>
-
-<tr><th></th><th></th><th></th><th></th></tr>
-
-<tr>
-    <td>Asosiy vositalarning qoldiq qiymati (010-011)</td>
-    <td>010</td>
-    <td>{next((r.get("sum_begin_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "010"), "---")}</td>
-    <td>{next((r.get("sum_end_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "010"), "---")}</td>
-</tr>
-
-<tr>
-    <td>Jami inventarizatsiya (150+160+170+180-qatorlar), shu jumladan:</td>
-    <td>140</td>
-    <td>{next((r.get("sum_begin_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "140"), "---")}</td>
-    <td>{next((r.get("sum_end_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "140"), "---")}</td>
-</tr>
-
-<tr>
-    <td>Jami debitorlar (220+240+250+260+270+280+290+300+310 qatorlar)</td>
-    <td>210</td>
-    <td>{next((r.get("sum_begin_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "210"), "---")}</td>
-    <td>{next((r.get("sum_end_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "210"), "---")}</td>
-</tr>
-
-<tr>
-    <td>Balans aktivlarining umumiy summasi (130-qator + 390-qator)</td>
-    <td>400</td>
-    <td>{next((r.get("sum_begin_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "400"), "---")}</td>
-    <td>{next((r.get("sum_end_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "400"), "---")}</td>
-</tr>
-
-<tr>
-    <td>Shu jumladan: joriy kreditorlik qarzlari (610+630+650+670+680+690+700+710+720+760-qatorlar)</td>
-    <td>601</td>
-    <td>{next((r.get("sum_begin_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "601"), "---")}</td>
-    <td>{next((r.get("sum_end_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "601"), "---")}</td>
-</tr>
-
-<tr>
-    <td>Uzoq muddatli bank kreditlari (7810)</td>
-    <td>570</td>
-    <td>{next((r.get("sum_begin_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "570"), "---")}</td>
-    <td>{next((r.get("sum_end_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "570"), "---")}</td>
-</tr>
-
-<tr>
-    <td>Qisqa muddatli bank kreditlari (6810)</td>
-    <td>730</td>
-    <td>{next((r.get("sum_begin_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "730"), "---")}</td>
-    <td>{next((r.get("sum_end_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "730"), "---")}</td>
-</tr>
-
-<tr>
-    <td>Jami majburiyatlar (480+770-qatorlar)</td>
-    <td>780</td>
-    <td>{next((r.get("sum_begin_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "780"), "---")}</td>
-    <td>{next((r.get("sum_end_period") for r in body.get("forma_1", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "780"), "---")}</td>
-</tr>
-
-<tr>
-    <td>Moliyaviy ko'rsatkichlar ma'lumotlari</td>
-    <td></td><td></td><td></td>
-</tr>
-
-<tr>
-    <td>Mahsulotlar (tovarlar, ishlar va xizmatlar) sotishdan olingan sof daromad</td>
-    <td>010</td>
-    <td>{next((r.get("sum_period_doxod") for r in body.get("forma_2", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "010"), "---")}</td>
-    <td>{next((r.get("sum_period_rasxod") for r in body.get("forma_2", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "010"), "---")}</td>
-</tr>
-
-<tr>
-    <td>Hisobot davri uchun sof foyda (zarar) (240-250-260-qatorlar)</td>
-    <td>270</td>
-    <td>{next((r.get("sum_period_doxod") for r in body.get("forma_2", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "270"), "---")}</td>
-    <td>{next((r.get("sum_period_rasxod") for r in body.get("forma_2", {}).get("data", [{}])[0].get("rows", []) if r.get("row_no") == "270"), "---")}</td>
-</tr>
-</table>
-
-
-
-8-BO‘LIM — Korxona haqidagi qisqacha ma'lumot
-
-
-<p><strong>Korxona haqida qisqacha ma’lumot:</strong><br/>
-    {body.get("company_info", {}).get("data", {}).get("name", "---")} korxonasi {body.get("foundation_year", "---")} yildan beri faoliyat yuritib, asosan {body.get("company_info", {}).get("data", {}).get("okedDetail", {}).get("name", "---")} sohasida xizmat ko‘rsatib keladi. Korxona yuridik manzili: {body.get("company_info", {}).get("data", {}).get("companyBillingAddress", {}).get("region", {}).get("name", "---")}, {body.get("company_info", {}).get("data", {}).get("companyBillingAddress", {}).get("district", {}).get("name", "---")}, {body.get("company_info", {}).get("data", {}).get("companyBillingAddress", {}).get("streetName", "---")}. Tashkilotda {body.get("employeeCount", "---")} nafar xodim ishlaydi.
-</p>
-
-<p><em><u>Korxona nomidagi obyektlar:</u></em></p>
-
-<table border="1" cellspacing="0" cellpadding="4" width="100%"
-       style="font-family:'Times New Roman'; font-size:11pt;">
-<tr>
-    <th>TIN</th>
-    <th>Kompaniya nomi</th>
-    <th>Turi</th>
-    <th>Kadastr raqami</th>
-    <th>Bino nomi</th>
-    <th>Manzili</th>
-    <th>Egalik qiluvchi ulushi (%)</th>
-    <th>Inventar narx</th>
-    <th>Umumiy maydon</th>
-    <th>Bino maydoni</th>
-    <th>Qo'shimcha maydon</th>
-</tr>
-
-{''.join(
-    f"<tr>"
-    f"<td>{i.get('tin', '---')}</td>"
-    f"<td>{i.get('name', '---')}</td>"
-    f"<td>{i.get('type', '---')}</td>"
-    f"<td>{i.get('obj_code', '---')}</td>"
-    f"<td>{i.get('obj_name', '---')}</td>"
-    f"<td>{i.get('address', '---')}</td>"
-    f"<td>{i.get('percentage', '---')}</td>"
-    f"<td>{i.get('inv_cost', '---')}</td>"
-    f"<td>{i.get('total_area', '---')}</td>"
-    f"<td>{i.get('land_area', '---')}</td>"
-    f"<td>{i.get('land_extra_area', '---')}</td>"
-    f"</tr>"
-    for i in body.get("taxObjects", {}).get("dataObject", [])
-)}
-</table>
-
-<p><em><u>Korxona nomidagi mashinalar:</u></em></p>
-
-<table border="1" cellspacing="0" cellpadding="4" width="100%"
-       style="font-family:'Times New Roman'; font-size:11pt;">
-<tr>
-    <th>Modeli</th>
-    <th>Rangi</th>
-    <th>Yil</th>
-    <th>Kuzov raqami</th>
-    <th>Motor</th>
-    <th>Shassi</th>
-    <th>Davlat raqami</th>
-    <th>Ro'yxatdan o'tgan sana</th>
-    <th>Diviziya</th>
-    <th>Egalik qiluvchi</th>
-    <th>Manzili</th>
-</tr>
-
-{''.join(
-    f"<tr>"
-    f"<td>{i.get('model', '---')}</td>"
-    f"<td>{i.get('color', '---')}</td>"
-    f"<td>{i.get('year', '---')}</td>"
-    f"<td>{i.get('kuzov', '---')}</td>"
-    f"<td>{i.get('motor', '---')}</td>"
-    f"<td>{i.get('shassi', '---')}</td>"
-    f"<td>{i.get('gosNumber', '---')}</td>"
-    f"<td>{i.get('regDate', '---')}</td>"
-    f"<td>{i.get('division', '---')}</td>"
-    f"<td>{i.get('owner', '---')}</td>"
-    f"<td>{i.get('adres', '---')}</td>"
-    f"</tr>"
-    for i in body.get("taxObjects", {}).get("carDataObject", [])
-)}
-</table>
-
-
-
-9-BO‘LIM — Yakuniy kredit bo‘yicha ekspert xulosasi
-
+• HECH QACHON, HECH BIR SO'Z HAM SO'RALGAN TILDAN BOSHQA TILDA CHIQMASIN! HAR BIR SO'Z VA HAR BIR GAP BELGILANGAN TILGAN TARJIMA QILINSIN!
+• Agar 'cyrl' (Kirill) so'ralsa, javobni to'liq KIRILL alifbosida yozing. Lotin harflari aralashtrilmasin!
+• YAXSHILAB UYLAB BIRNECHA MARTA TEKSHIKIB KEYIN RESULT BERILSIN
 
 <h3>Yakuniy kredit bo‘yicha ekspert xulosasi</h3>
 
 Xulosa quyidagilar asosida avtomatik shakllantiriladi:
-
 ✓ Kompaniya faoliyat holati  
 ✓ Har doim forma bo‘yicha 
 ✓ Pul oqimi  
 ✓ Zalog likvidligi  
-✓ Risklar  Kredit berish tavsiya qilinadi
+✓ Risklar
 ✓ Kuchli tomonlar  
-yuqoridagi natijalar hammasi qisqa londa bo'lsin. Hammasi bitta paragraphda yozilsin.
+
+Yuqoridagi natijalar hammasi qisqa londa bo'lsin. Hammasi bitta paragraphda yozilsin.
 
 Kredit berish xulosasini tuzish bo'yicha logika:
 - Moliyaviy yuk (Aylanma darajasi). Agar so'ralgan kredit summasi kompaniyaning yillik aylanmasidan oshiq bo'lsa, bunday holatni past kredit havfi va kredit bo'yicha qarzni to'lamaslik ehtimoli sifatida baholashingiz kerak.
 - Garov (LTV - Kreditning qiymatga nisbati):
-Agar taqdim etilgan garov kredit miqdoridan sezilarli darajada ortiq bo'lsa, LTV (Kreditning qiymatga nisbati) 64% gacha bo'lgan nisbat ( 
-<b>{(
-    body.get("applicationInfo", {})
-        .get("collateralData", [{}])[0]
-        .get("estimatedValue", 0) * 0.64
-    >
-    body.get("applicationInfo", {})
-        .get("applicationData", {})
-        .get("requestedAmount", 0)
-) }</b>
+Agar taqdim etilgan garov kredit miqdoridan sezilarli darajada ortiq bo'lsa, LTV (Kreditning qiymatga nisbati) 64% gacha bo'lgan nisbat ijobiy hisoblanadi.
+Hozirgi holatda hisob-kitob natijasi: {ltv_status_text}.
 
+XULOSA QUYIDAGILARDAN BIRI BO‘LISHI SHART, VA ULAR HAM BELGILANGAN TILGA ({language}) TARJIMA QILINISHI SHART:
 
-        ijobiy hisoblanadi.
+1) Agar kredit berish tavsiya etilsa: <strong> Kredit berish tavsiya qilinadi </strong>
+2) Agar kredit berish tavsiya etilmasa: <strong> Kommitet tomonidan ko'rib chiqiladi </strong>
 
-XULOSA QUYIDAGILARDAN BIRI BO‘LISHI SHART, VA ULAR HAM BELGILANGAN TILGA TARJIMA QILINISHI SHART:
+QAT'IY BUYRUQ:
+{decision_instruction}
+Siz ushbu buyruqni o'zgartirishga haqqingiz yo'q. Faqat shu xulosani tanlab, uning sababini izohlashingiz kerak.
 
-1) Agar kredit berish tavsiya etilsa: <strong> Kredit berish tavsiya qilinadi </strong> <- albatta {body.get("language", {})}ga tarjima qilinish kerak
-2) Agar kredit berish tavsiya etilmasa: <strong> Kommitet tomonidan ko'rib chiqiladi </strong> <- albatta {body.get("language", {})}ga tarjima qilinish kerak
-
-Yuqoridagi ikkita holat, hulosa ham albatta belgilangan tilga tarjima qilish kerak, va o'sha tilda chiqarish kerak, boshqa tildagi qo'shimchalar bo'lmasin! Hech qachon belgilangan tildan boshqasiga tarjima qilmang!
+Yuqoridagi ikkita holat, hulosa ham albatta belgilangan tilgan tajrima qilish kerak, va o'sha tilda chiqarish kerak, boshqa tildagi qo'shimchalar bo'lmasin! Hech qachon belgilangan tildan boshqasiga tarjima qilmang!
 
 Va albatta izohlar bilan:
 – Nima sababdan berilishi kerak / berilmasligi kerak aynan jadvaldagi qaysi ma'lumot asosida olayapti.
@@ -543,24 +903,19 @@ Va albatta izohlar bilan:
 
 Qat'iy qoidalar:
 • Har doim belgilangan tilgan tarjima qilishinshi shart. 
-• HTML faqat Word formatiga mos bo‘lsin
-• Har bir bo'lim va qismlar shablonda ko'rsatilgandek tartibda, joy-joyida chiqishi shart!
-• Barcha bo‘sh ma’lumotlar — `---`  
-• Raqamlar 1 234 567.89 tarzida formatlansin  
 • Ovoz ohangi — professional bank ekspertizasi
-• Javob juda ham sifatli va juda ham tez bo'lishi lozim. Foydalanuvchi kutib qolmasligi uchun!
-• Chiquvchi natijalarga "\n" belgilarini qo'yma orniga </br> ishlat. oxirgi natija wordga yozish uchun tayyor html shaklda bolishi kerak. 
-• Textlar toza natija bo'lishi kerkak.
+• Javob juda ham sifatli va juda ham tez bo'lishi lozim.
 • Chiquvchi text malumotlar ham tartibli kerakli joylar alohida korsatilgan holatda bolishi kerak.
-• "---" bu ma'lumot yo'q degani. 
-• "language" fieldida so'ralgan tilda javob generatsiya qilish lozim!
+• "language" fieldida so'ralgan tilda ({language}) javob generatsiya qilish lozim!
+• Kredit tavsiya berish yoki bermaslik tavsiyasi <strong> tag ichida bulishi shard
 """
 
     agent = create_agent(model=llm, tools=[], system_prompt=system_prompt)
-
-    result = agent.invoke({"messages": [{"role": "user", "content": input_data}]})
-
-    html = result["messages"][-1].content
-
-    return HTMLResponse(content=html, status_code=200)
-
+    
+    result = agent.invoke({"messages": [{"role": "user", "content": input_json_str}]})
+    ai_response_html = result["messages"][-1].content
+    
+    # Combine Code-based HTML Generation with AI Response
+    full_html = build_html(payload.root, ai_response_html)
+    
+    return HTMLResponse(content=full_html, status_code=200)

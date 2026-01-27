@@ -1,16 +1,26 @@
 services:
-  chain-bot:
+  chain-api:
     build: .
     ports:
       - "8000:8000"
-    container_name: chain-bot
+    container_name: chain-api
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-
     develop:
       watch:
         - action: restart
-          path: ./agent.py
+          path: ./main.py
+        - action: restart
+          path: ./document.py
+        - action: restart
+          path: ./uy_joy.py
+        - action: restart
+          path: ./avto.py
+        - action: restart
+          path: ./forma1.py
+        - action: restart
+          path: ./forma2.py
+        - action: restart
+          path: ./xmed.py
         - action: rebuild
           path: ./requirements.txt
